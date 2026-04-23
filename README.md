@@ -37,7 +37,7 @@ code_agent/
 ### 2. 安装依赖
 建议创建虚拟环境，克隆项目后在根目录下执行：
 ```bash
-pip install -e .
+pip install -r requirements.txt
 ```
 
 ### 3. 配置环境变量
