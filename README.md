@@ -33,12 +33,11 @@ code_agent/
 
 ### 1. 环境要求
 - **Python:** 3.10 及以上 (< 3.13)
-- **依赖管理工具:** [Poetry](https://python-poetry.org/)
 
 ### 2. 安装依赖
-克隆项目后，在根目录下执行：
+建议创建虚拟环境，克隆项目后在根目录下执行：
 ```bash
-poetry install
+pip install -e .
 ```
 
 ### 3. 配置环境变量
@@ -49,9 +48,9 @@ OPENAI_API_BASE=https://api.your-provider.com/v1 # 可选
 ```
 
 ### 4. 运行 Agent
-通过 Poetry 启动主程序入口：
+启动主程序入口：
 ```bash
-poetry run python src/main.py
+python src/main.py
 ```
 
 ## 🤝 参与贡献
