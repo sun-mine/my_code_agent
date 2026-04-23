@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "code-agent"
+version = "0.1.0"
+description = "Autonomous AI programming agent based on LangGraph"
+authors = ["Your Name <your.email@example.com>"]
+
+[tool.poetry.dependencies]
+python = ">=3.10,<3.13"
+langgraph = "^0.0.27" # or latest
+langchain = "^0.1.0"
+langchain-core = "^0.1.0"
+langchain-openai = "^0.1.0" # for compatible APIs like DeepSeek/GLM
+rich = "^13.7.0"
+python-dotenv = "^1.0.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
