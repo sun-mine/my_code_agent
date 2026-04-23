@@ -5,10 +5,10 @@ from langgraph.checkpoint.memory import MemorySaver
 from src.core.state import AgentState
 from src.models.factory import get_model
 from src.tools.filesys import write_file, read_file, replace_in_file
-from src.tools.terminal import execute_command
+from src.tools.terminal import execute_command, get_background_status
 
 # Define the tools
-tools = [write_file, read_file, replace_in_file, execute_command]
+tools = [write_file, read_file, replace_in_file, execute_command, get_background_status]
 tool_node = ToolNode(tools)
 
 def supervisor_node(state: AgentState):
