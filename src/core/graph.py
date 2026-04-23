@@ -38,7 +38,7 @@ def supervisor_node(state: AgentState):
         route_decision = model.invoke([HumanMessage(content=prompt)]).content.strip().lower()
         
         if "coder" in route_decision:
-            next_node = "coder"
+            next_node = "planner"
         elif "debugger" in route_decision:
             next_node = "debugger"
         else:
@@ -49,7 +49,7 @@ def supervisor_node(state: AgentState):
         if "干什么" in last_user_message or "能做" in last_user_message:
             next_node = "chat"
         else:
-            next_node = "coder"
+            next_node = "planner"
 
     return {"next_node": next_node}
 
@@ -67,6 +67,29 @@ def chat_node(state: AgentState):
         msg = AIMessage(content=f"系统提示：请复制一份 `.env.example` 到 `.env` 文件并填入正确的 API KEY 才能激活实际对话。\n*(模型异常详情: {e})*")
         
     return {"messages": [msg], "next_node": END}
+
+
+def planner_node(state: AgentState):
+    '''
+    规划节点: 在采取任何行动之前，分析任务，阅读相关上下文，制定清晰的拆解步骤。
+    '''
+    print("[Planner] 正在拆解并规划任务...")
+    
+    try:
+        model = get_model("chat")
+        system_prompt = SystemMessage(
+            content="你是一个专业的任务规划师 (Task Planner)。\n"
+                    "你的任务是仔细阅读用户的请求，如果不清楚，列出你需要哪些文件与执行步骤。\n"
+                    "请输出一个 Markdown 格式的执行计划 (Task Plan) 给 Coder，"
+                    "比如：\n1. [ ] 读取某某文件以理解上下文\n2. [ ] 编写业务逻辑\n3. [ ] 运行测试确认\n"
+                    "请不要自己执行工具，只需给出计划即可。"
+        )
+        response = model.invoke([system_prompt] + list(state["messages"]))
+        msg = response
+    except Exception as e:
+        msg = AIMessage(content=f"[Planner] 规划异常: {e}")
+        
+    return {"messages": [msg], "next_node": "coder"}
 
 def coder_node(state: AgentState):
     """
@@ -108,6 +131,7 @@ def build_graph():
 
     # 注册节点
     workflow.add_node("supervisor", supervisor_node)
+    workflow.add_node("planner", planner_node)
     workflow.add_node("chat", chat_node)
     workflow.add_node("coder", coder_node)
     workflow.add_node("debugger", debugger_node)
@@ -121,7 +145,7 @@ def build_graph():
         "supervisor",
         lambda x: x["next_node"],
         {
-            "coder": "coder",
+            "coder": "planner",
             "debugger": "debugger",
             "chat": "chat",
             END: END
@@ -137,6 +161,7 @@ def build_graph():
         }
     )
     
+    workflow.add_edge("planner", "coder")
     workflow.add_edge("chat", END)
     workflow.add_edge("debugger", "coder")
     workflow.add_edge("tools", "coder")
