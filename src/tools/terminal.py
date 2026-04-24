@@ -1,3 +1,5 @@
+from src.security.permissions import SecurityArbiter, PermissionMode
+arbiter = SecurityArbiter()
 import subprocess
 import os
 import time
@@ -60,6 +62,8 @@ def execute_command(command: str, timeout: int = 120, run_in_background: bool = 
             
         if not output.strip():
             output = f"Command executed successfully with exit code {result.returncode} (No output)."
+        elif len(output) > 2000:
+            output = output[:2000] + f"\n\n...[输出过长已被截断，隐藏了 {len(output)-2000} 个字符]..."
             
         return output
     except subprocess.TimeoutExpired:

@@ -1,3 +1,5 @@
+from src.security.permissions import SecurityArbiter, PermissionMode
+arbiter = SecurityArbiter()
 import os
 import subprocess
 import shlex
@@ -34,7 +36,10 @@ def read_file(filepath: str) -> str:
     try:
         result = subprocess.run(f"cat {shlex.quote(filepath)}", shell=True, capture_output=True, text=True, encoding='utf-8')
         if result.returncode == 0:
-            return result.stdout
+            content = result.stdout
+            if len(content) > 5000:
+                content = content[:5000] + f"\n\n...[文件内容过长，已被截断，隐藏了 {len(content)-5000} 个字符。如需查看更多请使用 grep 或截取命令]..."
+            return content
         return f"CLI read failed: {result.stderr}"
     except Exception as e:
         return f"Failed to CLI read {filepath}: {str(e)}"

@@ -6,10 +6,19 @@ from src.core.state import AgentState
 from src.models.factory import get_model
 from src.tools.filesys import write_file, read_file, replace_in_file
 from src.tools.terminal import execute_command, get_background_status
+from src.tools.knowledge import search_web
+from src.tools.memory_tools import remember, recall
+from src.utils.prompt_manager import load_prompt
 
 # Define the tools
-tools = [write_file, read_file, replace_in_file, execute_command, get_background_status]
-tool_node = ToolNode(tools)
+code_tools = [write_file, read_file, replace_in_file, execute_command, get_background_status, search_web, remember, recall]
+explore_tools = [read_file, execute_command, get_background_status, search_web, remember, recall]
+chat_tools = [search_web]
+
+coder_tool_node = ToolNode(code_tools)
+planner_tool_node = ToolNode(explore_tools)
+chat_tool_node = ToolNode(chat_tools)
+debugger_tool_node = ToolNode(explore_tools)
 
 def supervisor_node(state: AgentState):
     """
@@ -25,16 +34,9 @@ def supervisor_node(state: AgentState):
     # 这里应该用 LLM (DeepSeek-reasoner) 来做意图分类
     # 为保证系统稳定，我们先尝试加载模型进行路由检查
     try:
-        model = get_model(model_type="glm") # 用 GLM flash 做快速路由分析
-        prompt = f"""
-分析以下用户的输入，并输出你应该将任务路由到哪个节点：
-只允许输出以下三个单词之一：
-- "coder": 如果用户要求写代码、修复bug、改写脚本、或者涉及代码相关的具体技术任务。
-- "debugger": 如果用户粘贴了报错信息（Traceback、日志等），或明确要求排查报错。
-- "chat": 如果用户仅仅是日常打招呼、询问"你是谁"、"你能做什么"等通用问答。
-
-用户输入: {last_user_message}
-输出:"""
+        model = get_model(model_type="deepseek-reasoner") # 意图分析使用 deepseek-reasoner
+        supervisor_prompt_tmpl = load_prompt("supervisor")
+        prompt = supervisor_prompt_tmpl.format(user_input=last_user_message)
         route_decision = model.invoke([HumanMessage(content=prompt)]).content.strip().lower()
         
         if "coder" in route_decision:
@@ -59,32 +61,28 @@ def chat_node(state: AgentState):
     """
     print("[Chat] 正在响应日常交互...")
     try:
-        model = get_model("chat")
-        system_prompt = SystemMessage(content="你是基于 LangGraph 构建的 AI 代码智能体助手。你可以编写代码、执行工具、调试报错等。请用友好、专业的态度回答用户，如果用户问你能干什么，请介绍你的核心能力。")
-        response = model.invoke([system_prompt] + list(state["messages"]))
+        model = get_model("glm") # chat 使用 GLM
+        model_with_tools = model.bind_tools(chat_tools)
+        system_prompt = SystemMessage(content=load_prompt("chat"))
+        response = model_with_tools.invoke([system_prompt] + list(state["messages"]))
         msg = response
     except Exception as e:
         msg = AIMessage(content=f"系统提示：请复制一份 `.env.example` 到 `.env` 文件并填入正确的 API KEY 才能激活实际对话。\n*(模型异常详情: {e})*")
         
-    return {"messages": [msg], "next_node": END}
+    return {"messages": [msg]}
 
 
 def planner_node(state: AgentState):
     '''
-    规划节点: 在采取任何行动之前，分析任务，阅读相关上下文，制定清晰的拆解步骤。
+    规划节点: 在采取行动之前，主动使用工具收集上下文，然后制定清晰的拆解步骤。
     '''
-    print("[Planner] 正在拆解并规划任务...")
+    print("[Planner] 正在收集上下文并生成计划...")
     
     try:
-        model = get_model("chat")
-        system_prompt = SystemMessage(
-            content="你是一个专业的任务规划师 (Task Planner)。\n"
-                    "你的任务是仔细阅读用户的请求，如果不清楚，列出你需要哪些文件与执行步骤。\n"
-                    "请输出一个 Markdown 格式的执行计划 (Task Plan) 给 Coder，"
-                    "比如：\n1. [ ] 读取某某文件以理解上下文\n2. [ ] 编写业务逻辑\n3. [ ] 运行测试确认\n"
-                    "请不要自己执行工具，只需给出计划即可。"
-        )
-        response = model.invoke([system_prompt] + list(state["messages"]))
+        model = get_model("deepseek-chat") # planner 使用 deepseek-chat
+        model_with_tools = model.bind_tools(explore_tools)
+        system_prompt = SystemMessage(content=load_prompt("planner"))
+        response = model_with_tools.invoke([system_prompt] + list(state["messages"]))
         msg = response
     except Exception as e:
         msg = AIMessage(content=f"[Planner] 规划异常: {e}")
@@ -98,21 +96,14 @@ def coder_node(state: AgentState):
     print("[Coder] 正在处理代码生成任务...")
     
     try:
-        model = get_model("chat") # 实际情况可配置为 doubao-code 或 deepseek-chat
-        model_with_tools = model.bind_tools(tools)
-        system_prompt = SystemMessage(
-            content="你是一个专业的代码编写专家(Coder Node)。\n"
-                    "重要规则：\n"
-                    "1. 绝不要为一个需求提供多种语言或版本的实现（例如不要同时写网页版和Python版），一次只给出一个最符合要求的最优版本即可！\n"
-                    "2. 如果用户要求用命令行或不适用某种语言，请严格遵守（如写 bash 脚本实现）。\n"
-                    "3. 如果需要调试或修改代码，必须直接修补并覆盖原来的文件！绝不允许像新建 `test2.py`、`main_stable.py` 这种重新创建无数个新文件。要始终在同一个文件上修改迭代！\n"
-                    "4. 如果需要运行或测试，请使用工具执行。不要瞎猜执行结果。\n"
-                    "5. 严格遵守极简交付规则：用户要什么你就只提供什么！绝不要擅作主张生成辅助测试脚本、README文档、安装指南等。完成用户的单点核心诉求后，立即停止产生后续无用工作量。"
-        )
+        model = get_model("doubao") # coder 使用 豆包2.0code
+        model_with_tools = model.bind_tools(code_tools)
+        system_prompt = SystemMessage(content=load_prompt("coder"))
         response = model_with_tools.invoke([system_prompt] + list(state["messages"]))
         msg = response
     except Exception as e:
         msg = AIMessage(content=f"代码分析完毕，但需要配置 `.env` 才能得到真正的 LLM 回复。*(异常: {e})*")
+        print(f"[Coder 异常]: {e}")
         
     return {"messages": [msg], "next_node": END}
 
@@ -121,7 +112,16 @@ def debugger_node(state: AgentState):
     诊断分析节点: 分析终端日志或多模态截图。
     """
     print("[Debugger] 正在分析报错信息...")
-    return {"next_node": "coder"}
+    try:
+        model = get_model("doubao") # debugger 使用 豆包2.0code
+        model_with_tools = model.bind_tools(explore_tools)  # 可以配一些文件查阅工具
+        system_prompt = SystemMessage(content=load_prompt("debugger"))
+        response = model_with_tools.invoke([system_prompt] + list(state["messages"]))
+        msg = response
+    except Exception as e:
+        msg = AIMessage(content=f"[Debugger] 诊断异常: {e}")
+        
+    return {"messages": [msg], "next_node": "coder"}
 
 def build_graph():
     """
@@ -135,7 +135,11 @@ def build_graph():
     workflow.add_node("chat", chat_node)
     workflow.add_node("coder", coder_node)
     workflow.add_node("debugger", debugger_node)
-    workflow.add_node("tools", tool_node)
+    workflow.add_node("coder_tools", coder_tool_node)
+    workflow.add_node("planner_tools", planner_tool_node)
+
+    workflow.add_node("chat_tools", chat_tool_node)
+    workflow.add_node("debugger_tools", debugger_tool_node)
 
     # 制定路由规则
     workflow.set_entry_point("supervisor")
@@ -145,26 +149,56 @@ def build_graph():
         "supervisor",
         lambda x: x["next_node"],
         {
-            "coder": "planner",
+            "planner": "planner",
             "debugger": "debugger",
             "chat": "chat",
             END: END
         }
     )
     
+    # Planner 的工具调用循环
+    workflow.add_conditional_edges(
+        "planner",
+        tools_condition,
+        {
+            "tools": "planner_tools",
+            END: "coder"
+        }
+    )
+    workflow.add_edge("planner_tools", "planner")
+    
+    # Coder 的工具调用循环
     workflow.add_conditional_edges(
         "coder",
         tools_condition,
         {
-            "tools": "tools",
+            "tools": "coder_tools",
             END: END
         }
     )
+    workflow.add_edge("coder_tools", "coder")
     
-    workflow.add_edge("planner", "coder")
-    workflow.add_edge("chat", END)
-    workflow.add_edge("debugger", "coder")
-    workflow.add_edge("tools", "coder")
+    # Chat 的工具调用循环
+    workflow.add_conditional_edges(
+        "chat",
+        tools_condition,
+        {
+            "tools": "chat_tools",
+            END: END
+        }
+    )
+    workflow.add_edge("chat_tools", "chat")
+    
+    # Debugger 的工具调用循环
+    workflow.add_conditional_edges(
+        "debugger",
+        tools_condition,
+        {
+            "tools": "debugger_tools",
+            END: "coder"
+        }
+    )
+    workflow.add_edge("debugger_tools", "debugger")
 
     memory = MemorySaver()
     return workflow.compile(checkpointer=memory)
