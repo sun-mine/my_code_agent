@@ -1,0 +1,24 @@
+{
+  "name": "code_agent",
+  "version": "1.0.0",
+  "description": "- **流式对话** — SocketIO 实时推送，支持停止生成/中断 - **工具调用时间线** — 每次工具调用以可折叠卡片展示输入/输出 - **任务看板** — 三列看板（待处理/进行中/已完成）实时同步 - **Todo 联动** — Agent 更新 Todo 后前端即时刷新 - **多 Agent 状态** — 显示团队成员角色与运行状态 - **安全快照** — 创建/恢复文件快照，高危操作二次确认 - **文件树预览** — 只读浏览工作区文件，点击查看内容 - **底部状态栏** — 连接状态、Agent 状态、模型名实时显示",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/myh-1302/code_agent.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/myh-1302/code_agent/issues"
+  },
+  "homepage": "https://github.com/myh-1302/code_agent#readme",
+  "devDependencies": {
+    "jest": "^30.4.2"
+  }
+}

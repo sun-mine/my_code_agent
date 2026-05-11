@@ -1,2 +1,23 @@
-.env
+# Runtime state
+.agent/
+
+# Python
 __pycache__/
+*.py[cod]
+*.egg-info/
+
+# Node
+node_modules/
+frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+
+# Logs & Transcripts
+.transcripts/
+.errors/
+
+# OS
+.DS_Store
+Thumbs.db
