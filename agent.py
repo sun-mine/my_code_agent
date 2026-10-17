@@ -8,9 +8,6 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-if os.getenv("ANTHROPIC_BASE_URL"):
-    os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
-
 from core.loop import AgentLoop
 from components.config import Config
 from components.compactor import auto_compact
@@ -29,11 +26,8 @@ from core.subagent import run_subagent
 
 def main():
     cfg = Config()
-    client = Anthropic(
-        api_key=os.getenv("ANTHROPIC_AUTH_TOKEN"),
-        base_url=os.getenv("ANTHROPIC_BASE_URL")
-        )
-    model = os.environ["MODEL_ID"]
+    client = Anthropic(api_key=cfg.api_key, base_url=cfg.base_url)
+    model = cfg.model
     
     # 初始化基础组件
     skills = SkillLoader(cfg.skills_dir)

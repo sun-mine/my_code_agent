@@ -121,7 +121,7 @@ function ToolLine({ tc }: { tc: ToolCall }) {
         style={{
           display: 'flex', alignItems: 'center', gap: 6,
           width: '100%', padding: '4px 8px', borderRadius: 6,
-          background: isRunning ? 'rgba(232,133,92,0.08)' : 'var(--bg-base)',
+          background: isRunning ? 'var(--accent-soft)' : 'var(--bg-base)',
           border: '1px solid var(--border)',
           cursor: 'pointer', textAlign: 'left',
           fontSize: 12, color: 'var(--text-2)',
@@ -298,12 +298,13 @@ export function MessageBubble({ msg }: MessageBubbleProps) {
       }}>
         <div style={{ maxWidth: '80%', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
           <div style={{
-            background: 'var(--bg-overlay)',
-            border: '1px solid var(--border-hi)',
+            background: 'var(--accent-soft)',
+            border: '1px solid var(--accent-border)',
             padding: '9px 14px',
             borderRadius: '14px 4px 14px 14px',
             color: 'var(--text-1)', fontSize: 14, lineHeight: 1.6,
             whiteSpace: 'pre-wrap',
+            boxShadow: 'var(--shadow-sm)',
           }}>
             {renderContent(msg.content)}
           </div>
@@ -312,11 +313,11 @@ export function MessageBubble({ msg }: MessageBubbleProps) {
           </span>
         </div>
         <div style={{
-          width: 26, height: 26, borderRadius: '50%', flexShrink: 0,
+          width: 26, height: 26, borderRadius: 8, flexShrink: 0,
           background: 'var(--bg-overlay)', border: '1px solid var(--border-hi)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontSize: 11, fontWeight: 700, color: 'var(--text-2)',
-          marginTop: 2,
+          marginTop: 2, boxShadow: 'var(--shadow-sm)',
         }}>
           U
         </div>
@@ -334,10 +335,11 @@ export function MessageBubble({ msg }: MessageBubbleProps) {
       animation: 'fadeIn 0.2s ease',
     }}>
       <div style={{
-        width: 26, height: 26, borderRadius: '50%', flexShrink: 0,
-        background: 'var(--accent)',
+        width: 26, height: 26, borderRadius: 8, flexShrink: 0,
+        background: 'linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         fontSize: 11, fontWeight: 700, color: '#fff', marginTop: 2,
+        boxShadow: 'var(--shadow-sm), inset 0 1px 0 rgba(255,255,255,.18)',
       }}>
         A
       </div>

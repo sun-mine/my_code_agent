@@ -53,57 +53,62 @@ export function Sidebar({ onSelectFile, onNewSession, onLoadSession, workdir, on
       overflow: 'hidden',
     }}>
       {/* ── New Session Button ──────────────────── */}
-      <div style={{ padding: '10px 12px' }}>
+      <div style={{ padding: '12px 12px 10px' }}>
         <button
           onClick={onNewSession}
           style={{
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-            width: '100%', padding: '8px 0', borderRadius: 8,
-            background: 'var(--accent)', border: 'none',
-            color: '#fff', fontSize: 13, fontWeight: 600,
-            cursor: 'pointer', transition: 'all 0.15s',
+            width: '100%', padding: '9px 0', borderRadius: 10,
+            background: 'linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%)',
+            border: 'none',
+            color: '#fff', fontSize: 13, fontWeight: 600, letterSpacing: '0.02em',
+            cursor: 'pointer', transition: 'all 0.18s ease',
+            boxShadow: 'var(--shadow-sm), inset 0 1px 0 rgba(255,255,255,.18)',
+          }}
+          onMouseOver={e => {
+            e.currentTarget.style.transform = 'translateY(-1px)'
+            e.currentTarget.style.boxShadow = 'var(--shadow-md), inset 0 1px 0 rgba(255,255,255,.18)'
+          }}
+          onMouseOut={e => {
+            e.currentTarget.style.transform = 'translateY(0)'
+            e.currentTarget.style.boxShadow = 'var(--shadow-sm), inset 0 1px 0 rgba(255,255,255,.18)'
           }}
         >
-          <Plus size={16} />
+          <Plus size={16} strokeWidth={2.4} />
           新建对话
         </button>
       </div>
 
-      {/* ── Tab Switcher ───────────────────────── */}
+      {/* ── Tab Switcher (segmented) ───────────── */}
       <div style={{
-        display: 'flex', gap: 0,
-        padding: '0 12px', marginBottom: 4,
+        display: 'flex', gap: 2,
+        margin: '0 12px 8px', padding: 3,
+        background: 'var(--bg-raised)',
+        border: '1px solid var(--border)',
+        borderRadius: 9,
       }}>
-        <button
-          onClick={() => setTab('chats')}
-          style={{
-            flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
-            padding: '7px 0', fontSize: 12, fontWeight: tab === 'chats' ? 600 : 400,
-            background: tab === 'chats' ? 'var(--bg-raised)' : 'none',
-            border: 'none', borderBottom: tab === 'chats' ? '2px solid var(--accent)' : '2px solid transparent',
-            color: tab === 'chats' ? 'var(--text-1)' : 'var(--text-3)',
-            cursor: 'pointer', borderRadius: '6px 6px 0 0',
-            transition: 'all 0.15s',
-          }}
-        >
-          <MessageSquare size={14} />
-          对话
-        </button>
-        <button
-          onClick={() => setTab('project')}
-          style={{
-            flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
-            padding: '7px 0', fontSize: 12, fontWeight: tab === 'project' ? 600 : 400,
-            background: tab === 'project' ? 'var(--bg-raised)' : 'none',
-            border: 'none', borderBottom: tab === 'project' ? '2px solid var(--accent)' : '2px solid transparent',
-            color: tab === 'project' ? 'var(--text-1)' : 'var(--text-3)',
-            cursor: 'pointer', borderRadius: '6px 6px 0 0',
-            transition: 'all 0.15s',
-          }}
-        >
-          <FolderTree size={14} />
-          项目
-        </button>
+        {([
+          { key: 'chats', icon: MessageSquare, label: '对话' },
+          { key: 'project', icon: FolderTree, label: '项目' },
+        ] as const).map(t => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            style={{
+              flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+              padding: '6px 0', fontSize: 12, fontWeight: tab === t.key ? 600 : 400,
+              background: tab === t.key ? 'var(--bg-overlay)' : 'transparent',
+              border: tab === t.key ? '1px solid var(--border-hi)' : '1px solid transparent',
+              boxShadow: tab === t.key ? 'var(--shadow-sm)' : 'none',
+              color: tab === t.key ? 'var(--text-1)' : 'var(--text-3)',
+              cursor: 'pointer', borderRadius: 7,
+              transition: 'all 0.15s',
+            }}
+          >
+            <t.icon size={13} />
+            {t.label}
+          </button>
+        ))}
       </div>
 
       {/* ── Tab Content ────────────────────────── */}

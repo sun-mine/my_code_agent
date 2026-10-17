@@ -183,7 +183,7 @@ export function FileTree({ onSelectFile, workdir, onWorkdirChange }: FileTreePro
         style={{
           flex: 1, overflow: 'auto',
           fontSize: 12, fontFamily: 'var(--font-mono)',
-          background: dragOver ? 'rgba(232,133,92,0.08)' : 'transparent',
+          background: dragOver ? 'var(--accent-soft)' : 'transparent',
           transition: 'background 0.15s',
           border: dragOver ? '1px dashed var(--accent)' : '1px solid transparent',
           margin: dragOver ? 4 : 0,

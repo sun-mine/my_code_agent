@@ -17,9 +17,6 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-if os.getenv("ANTHROPIC_BASE_URL"):
-    os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
-
 sys.path.insert(0, str(Path(__file__).parent))
 
 from anthropic import Anthropic
@@ -317,11 +314,8 @@ def init_agent(workdir: str = None):
     cfg = Config(workdir=workdir)
     _cfg = cfg  # 缓存供动态重建 system prompt 使用
     set_workdir(str(cfg.workdir))  # 同步 WORKDIR 到工具模块
-    client = Anthropic(
-        api_key=os.getenv("ANTHROPIC_AUTH_TOKEN"),
-        base_url=os.getenv("ANTHROPIC_BASE_URL"),
-    )
-    model = os.getenv("MODEL_ID", "deepseek-v4-flash")
+    client = Anthropic(api_key=cfg.api_key, base_url=cfg.base_url)
+    model = cfg.model
 
     skills = SkillLoader(cfg.skills_dir)
     _skills = skills  # 缓存供动态重建 system prompt 使用
@@ -641,38 +635,50 @@ _PROVIDER_MODELS = {
 }
 
 
+def _is_ollama() -> bool:
+    base_url = (_cfg.base_url if _cfg else "").lower()
+    return "11434" in base_url or "ollama" in base_url
+
+
 def _detect_available_models() -> list:
-    """Based on .env configuration, detect which models are available"""
-    import os
-    models = []
-    base_url = os.getenv("ANTHROPIC_BASE_URL", "").lower()
+    """Based on Config, detect which models are available"""
+    base_url = (_cfg.base_url if _cfg else "").lower()
+
+    if _is_ollama():
+        # 从本地 Ollama 拉取支持对话的模型
+        try:
+            import urllib.request
+            with urllib.request.urlopen(f"{_cfg.base_url}/api/tags", timeout=2) as r:
+                data = json.loads(r.read())
+            models = [
+                {"id": m["name"], "label": m["name"], "provider": "Ollama"}
+                for m in data.get("models", [])
+                if "completion" in m.get("capabilities", [])
+            ]
+            if models:
+                return models
+        except Exception:
+            pass
+        return [{"id": _cfg.model, "label": _cfg.model, "provider": "Ollama"}]
 
     if "deepseek" in base_url:
-        models.extend(_PROVIDER_MODELS["deepseek"])
-    elif "openai" in base_url:
-        models.extend(_PROVIDER_MODELS["openai"])
-    else:
-        models.extend(_PROVIDER_MODELS["anthropic"])
-
-    # Always add Anthropic models if a separate Anthropic key exists
-    if os.getenv("ANTHROPIC_AUTH_TOKEN") and "deepseek" in base_url:
-        # User has DeepSeek as primary, but they can switch
-        pass  # Only show detected provider models
-
-    return models
+        return list(_PROVIDER_MODELS["deepseek"])
+    if "openai" in base_url:
+        return list(_PROVIDER_MODELS["openai"])
+    return list(_PROVIDER_MODELS["anthropic"])
 
 
 @app.route("/api/models")
 def list_models():
     models = _detect_available_models()
-    current = os.getenv("MODEL_ID", models[0]["id"] if models else "")
+    current = _cfg.model if _cfg else (models[0]["id"] if models else "")
     return _ok({"models": models, "current": current})
 
 
 @app.route("/api/model")
 def get_model():
     if not agent_config:
-        return _ok({"model": os.getenv("MODEL_ID", "claude-sonnet-4-20250514")})
+        return _ok({"model": _cfg.model if _cfg else ""})
     return _ok({"model": agent_config.get("model", "")})
 
 
@@ -685,9 +691,11 @@ def set_model():
     new_model = (data.get("model") or "").strip()
     if not new_model:
         return _err("model required")
-    allowed = ("claude-", "deepseek-", "deepseek-v4-")
-    if not any(new_model.startswith(p) for p in allowed):
-        return _err(f"unsupported model: {new_model}")
+    # Ollama 允许任意本地模型名；其他服务仍限制前缀
+    if not _is_ollama():
+        allowed = ("claude-", "deepseek-", "deepseek-v4-")
+        if not any(new_model.startswith(p) for p in allowed):
+            return _err(f"unsupported model: {new_model}")
     agent_instance.model = new_model
     agent_config["model"] = new_model
     return _ok({"model": new_model, "message": "model switched"})
@@ -1355,7 +1363,7 @@ def handle_interrupt(_data=None):
 
 # ====== 启动 ======
 
-def run_server(host="0.0.0.0", port=5000, debug=False):
+def run_server(host="0.0.0.0", port=8000, debug=False):
     print("正在初始化 Agent...")
     init_agent()
     print(f"API 服务启动: http://{host}:{port}")

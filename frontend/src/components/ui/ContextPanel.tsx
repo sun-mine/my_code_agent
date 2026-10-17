@@ -91,7 +91,7 @@ export function ContextPanel({ tokenBreakdown, onCompress, busy }: ContextPanelP
               borderRadius: 'var(--radius-lg)',
               padding: '0',
               width: 380,
-              boxShadow: '0 8px 32px rgba(0,0,0,0.25)',
+              boxShadow: 'var(--shadow-lg)',
               display: 'flex', flexDirection: 'column',
             }}
           >

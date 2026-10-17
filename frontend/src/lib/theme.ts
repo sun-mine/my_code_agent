@@ -1,13 +1,14 @@
-export type Theme = 'dark' | 'beige'
+export type Theme = 'dark' | 'light'
 
 const THEME_KEY = 'code-agent-theme'
 
 export function getStoredTheme(): Theme {
   try {
     const stored = localStorage.getItem(THEME_KEY)
-    if (stored === 'dark' || stored === 'beige') return stored
+    if (stored === 'dark' || stored === 'light') return stored
+    if (stored === 'beige') return 'light' // 旧值迁移
   } catch {}
-  return 'beige'
+  return 'dark'
 }
 
 export function applyTheme(theme: Theme): void {
@@ -16,7 +17,7 @@ export function applyTheme(theme: Theme): void {
 }
 
 export function toggleTheme(): Theme {
-  const next = getStoredTheme() === 'beige' ? 'dark' : 'beige'
+  const next = getStoredTheme() === 'light' ? 'dark' : 'light'
   applyTheme(next)
   return next
 }

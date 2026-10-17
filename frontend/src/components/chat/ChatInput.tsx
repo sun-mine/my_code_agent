@@ -53,6 +53,7 @@ export function ChatInput({
   const [plusOpen, setPlusOpen] = useState(false)
   const [modelOpen, setModelOpen] = useState(false)
   const [modeOpen, setModeOpen] = useState(false)
+  const [focused, setFocused] = useState(false)
   const [slashState, setSlashState] = useState<{ query: string; selIdx: number } | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -295,12 +296,20 @@ export function ChatInput({
       )}
 
       {/* ── Main input box ────────────────────── */}
-      <div style={{
-        display: 'flex', flexDirection: 'column',
-        background: 'var(--bg-raised)', border: '1px solid var(--border-hi)',
-        borderRadius: 10, padding: '8px 10px 6px 6px',
-        transition: 'border-color 0.15s',
-      }}>
+      <div
+        onFocusCapture={() => setFocused(true)}
+        onBlurCapture={() => setFocused(false)}
+        style={{
+          display: 'flex', flexDirection: 'column',
+          background: 'var(--bg-raised)',
+          border: `1px solid ${focused ? 'var(--accent-border)' : 'var(--border-hi)'}`,
+          borderRadius: 14, padding: '10px 10px 6px 8px',
+          boxShadow: focused
+            ? '0 0 0 3px var(--accent-soft), var(--shadow-md)'
+            : 'var(--shadow-md)',
+          transition: 'border-color 0.18s, box-shadow 0.18s',
+        }}
+      >
         {/* Image strip */}
         {images.length > 0 && (
           <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap', padding: '0 4px' }}>
@@ -374,7 +383,7 @@ export function ChatInput({
                     position: 'absolute', bottom: 'calc(100% + 6px)', right: 0, zIndex: 101,
                     background: 'var(--bg-overlay)', border: '1px solid var(--border-hi)',
                     borderRadius: 8, padding: '4px 0', minWidth: 240,
-                    boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+                    boxShadow: 'var(--shadow-lg)',
                   }}>
                     <p style={{ fontSize: 10, color: 'var(--text-3)', padding: '4px 12px 6px', margin: 0, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                       选择模式
@@ -414,6 +423,7 @@ export function ChatInput({
                   padding: '4px 10px', borderRadius: 6, fontSize: 11,
                   background: 'var(--bg-overlay)', color: 'var(--text-2)',
                   border: '1px solid var(--border)', cursor: 'pointer',
+                  transition: 'all 0.15s',
                 }}
               >
                 <Square size={9} fill="currentColor" />
@@ -425,14 +435,17 @@ export function ChatInput({
                 disabled={(!draft.trim() && images.length === 0) || disabled}
                 title="发送 (Enter)"
                 style={{
-                  width: 30, height: 30, borderRadius: 7,
+                  width: 30, height: 30, borderRadius: 8,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   background: (draft.trim() || images.length > 0) && !disabled ? 'var(--accent)' : 'var(--bg-overlay)',
                   border: 'none',
                   color: (draft.trim() || images.length > 0) && !disabled ? '#fff' : 'var(--text-3)',
                   cursor: (draft.trim() || images.length > 0) && !disabled ? 'pointer' : 'not-allowed',
+                  boxShadow: (draft.trim() || images.length > 0) && !disabled ? 'var(--shadow-sm)' : 'none',
                   transition: 'all 0.15s',
                 }}
+                onMouseOver={e => { if ((draft.trim() || images.length > 0) && !disabled) e.currentTarget.style.background = 'var(--accent-2)' }}
+                onMouseOut={e => { if ((draft.trim() || images.length > 0) && !disabled) e.currentTarget.style.background = 'var(--accent)' }}
               >
                 <ArrowUp size={14} strokeWidth={2.5} />
               </button>
@@ -470,7 +483,7 @@ export function ChatInput({
                   position: 'absolute', bottom: '100%', left: 0, zIndex: 101,
                   background: 'var(--bg-overlay)', border: '1px solid var(--border-hi)',
                   borderRadius: 8, padding: '4px 0', minWidth: 160,
-                  boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+                  boxShadow: 'var(--shadow-lg)',
                   marginBottom: 6,
                 }}>
                   {[
@@ -524,7 +537,7 @@ export function ChatInput({
                   position: 'absolute', bottom: '100%', left: 0, zIndex: 101,
                   background: 'var(--bg-overlay)', border: '1px solid var(--border-hi)',
                   borderRadius: 8, padding: '4px 0', minWidth: 200,
-                  boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+                  boxShadow: 'var(--shadow-lg)',
                   marginBottom: 6,
                 }}>
                   <p style={{ fontSize: 10, color: 'var(--text-3)', padding: '4px 12px 6px', margin: 0, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
@@ -568,7 +581,7 @@ export function ChatInput({
             position: 'absolute', bottom: 'calc(100% + 4px)', left: 18, zIndex: 101,
             background: 'var(--bg-overlay)', border: '1px solid var(--border-hi)',
             borderRadius: 8, padding: '4px 0', minWidth: 220,
-            boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+            boxShadow: 'var(--shadow-lg)',
           }}>
             {matchedCommands.map((cmd, i) => (
               <button

@@ -29,19 +29,19 @@ export function PlanReview({ content, runId, onApprove, onReject, onModify, onCa
       margin: '12px 0', borderRadius: 12, overflow: 'hidden',
       background: 'var(--bg-surface)',
       border: '1px solid var(--accent)',
-      boxShadow: '0 0 0 1px rgba(232,133,92,0.2), 0 4px 24px rgba(0,0,0,0.3)',
+      boxShadow: '0 0 0 1px var(--accent-border), 0 4px 24px rgba(0,0,0,0.3)',
       animation: 'slideUp 0.25s ease',
     }}>
       {/* Header */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 10,
         padding: '12px 16px',
-        background: 'rgba(232,133,92,0.08)',
-        borderBottom: expanded ? '1px solid rgba(232,133,92,0.2)' : 'none',
+        background: 'var(--accent-soft)',
+        borderBottom: expanded ? '1px solid var(--accent-border)' : 'none',
       }}>
         <div style={{
           width: 34, height: 34, borderRadius: 9, flexShrink: 0,
-          background: 'rgba(232,133,92,0.15)', border: '1px solid rgba(232,133,92,0.3)',
+          background: 'var(--badge-accent)', border: '1px solid var(--accent-border)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
           <FileText size={17} color="var(--accent)" />

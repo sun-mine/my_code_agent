@@ -14,7 +14,7 @@ export function useAgentSocket({ onEvent, onStatusChange }: UseSocketOptions) {
 
   useEffect(() => {
     // In dev, connect directly to Flask to avoid Vite WS proxy EPIPE errors
-    const socketUrl = import.meta.env.DEV ? 'http://localhost:5000' : '/'
+    const socketUrl = import.meta.env.DEV ? 'http://localhost:8000' : '/'
     const socket = io(socketUrl, {
       path: '/socket.io',
       transports: ['polling', 'websocket'],

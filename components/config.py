@@ -9,6 +9,13 @@ class Config:
             self.workdir = Path(os.getenv("AGENT_WORKDIR")).resolve()
         else:
             self.workdir = Path.cwd()
+        # ====== 模型服务配置（默认使用本地 Ollama）======
+        # Ollama 原生兼容 Anthropic Messages API，直接复用 Anthropic SDK
+        # 切换其他服务时在 .env 覆盖这三个变量即可
+        self.base_url = os.getenv("ANTHROPIC_BASE_URL", "http://localhost:11434")
+        self.api_key = os.getenv("ANTHROPIC_AUTH_TOKEN") or "ollama"  # Ollama 不校验 key
+        self.model = os.getenv("MODEL_ID", "qwen2.5:3b")
+
         self.token_threshold = int(os.getenv("TOKEN_THRESHOLD", "100000"))
         # 所有 agent 运行时数据统一放在 workdir/.agent/ 下
         _agent_dir = self.workdir / ".agent"

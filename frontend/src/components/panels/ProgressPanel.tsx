@@ -28,7 +28,7 @@ export function ProgressPanel({ todos, visible }: ProgressPanelProps) {
       position: 'fixed', right: 24, bottom: 120, zIndex: 110,
       width: collapsed ? 48 : 260,
       background: 'var(--bg-surface)',
-      border: '1px solid var(--accent, #e8855c)',
+      border: '1px solid var(--accent)',
       borderRadius: 10,
       boxShadow: '0 4px 24px rgba(0,0,0,0.5)',
       transition: 'width 0.2s ease',

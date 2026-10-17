@@ -47,7 +47,7 @@ function FolderBrowser({ onSelect, onClose }: { onSelect: (path: string) => void
       <div style={{
         position: 'absolute', top: 44, left: 0, zIndex: 201, width: 340,
         background: 'var(--bg-overlay)', border: '1px solid var(--border-hi)',
-        borderRadius: 8, boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+        borderRadius: 8, boxShadow: 'var(--shadow-lg)',
         display: 'flex', flexDirection: 'column', maxHeight: 360,
       }}>
         <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -167,7 +167,7 @@ function WorkdirSelector({ current, onChanged, error }: {
           <div style={{
             position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 50, width: 360,
             background: 'var(--bg-surface)', border: '1px solid var(--border-hi)',
-            borderRadius: 8, padding: '12px', boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+            borderRadius: 8, padding: '12px', boxShadow: 'var(--shadow-lg)',
           }}>
             <p style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 6, marginTop: 0 }}>
               输入工作目录路径，或点击浏览选择
@@ -276,7 +276,7 @@ export default function App() {
 
   // Apply theme on mount
   useEffect(() => {
-    applyTheme((() => { try { const v = localStorage.getItem('code-agent-theme'); if (v === 'dark' || v === 'beige') return v } catch {} return 'beige' })())
+    applyTheme((() => { try { const v = localStorage.getItem('code-agent-theme'); if (v === 'dark' || v === 'light') return v; if (v === 'beige') return 'light' } catch {} return 'dark' })())
   }, [])
 
   // Restore conversation history on page load
@@ -652,9 +652,16 @@ export default function App() {
         position: 'relative', zIndex: 40,
       }}>
         {/* Left: Logo + WorkdirSelector */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Bot size={18} strokeWidth={2} color="var(--accent)" />
-          <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-1)', marginRight: 4 }}>Code Agent</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+          <div style={{
+            width: 26, height: 26, borderRadius: 8, flexShrink: 0,
+            background: 'linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: 'var(--shadow-sm), inset 0 1px 0 rgba(255,255,255,.18)',
+          }}>
+            <Bot size={15} strokeWidth={2.2} color="#fff" />
+          </div>
+          <span style={{ fontWeight: 700, fontSize: 13.5, letterSpacing: '0.01em', color: 'var(--text-1)', marginRight: 4 }}>Code Agent</span>
           <WorkdirSelector
             current={statusData?.workdir}
             onChanged={handleWorkdirChanged}
@@ -713,7 +720,7 @@ export default function App() {
             position: 'absolute', top: 44, right: 12, zIndex: 50,
             background: 'var(--bg-overlay)', border: '1px solid var(--border-hi)',
             borderRadius: 8, padding: '8px 0', minWidth: 300,
-            boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+            boxShadow: 'var(--shadow-lg)',
             maxHeight: 400, overflow: 'auto',
           }}>
             <p style={{ fontSize: 10, color: 'var(--text-3)', padding: '2px 14px 6px', margin: 0, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
@@ -773,17 +780,26 @@ export default function App() {
         {/* ─── Chat area ─────────────────────────────── */}
         <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
           {/* Messages scroll area */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: '20px 16px' }}>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '24px 20px' }}>
             {messages.length === 0 && (
-              <div style={{ textAlign: 'center', marginTop: '12vh' }}>
-                <Bot size={44} strokeWidth={1.5} color="var(--text-2)" style={{ marginBottom: 10 }} />
-                <p style={{ color: 'var(--text-1)', fontSize: 16, fontWeight: 600, margin: '0 0 6px' }}>
+              <div style={{ textAlign: 'center', marginTop: '11vh', animation: 'fadeIn 0.3s ease' }}>
+                <div style={{
+                  width: 60, height: 60, borderRadius: 18, margin: '0 auto 18px',
+                  background: 'linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  boxShadow: '0 10px 32px var(--accent-border), inset 0 1px 0 rgba(255,255,255,.22)',
+                }}>
+                  <Bot size={30} strokeWidth={1.8} color="#fff" />
+                </div>
+                <p style={{ color: 'var(--text-1)', fontSize: 21, fontWeight: 700, letterSpacing: '-0.01em', margin: '0 0 8px' }}>
                   Code Agent 已就绪
                 </p>
                 <p style={{ color: 'var(--text-3)', fontSize: 13, margin: '0 0 4px' }}>
                   工作目录：
                   <code style={{
-                    fontFamily: 'var(--font-mono)',
+                    fontFamily: 'var(--font-mono)', fontSize: 12,
+                    padding: '2px 8px', borderRadius: 6,
+                    background: 'var(--bg-raised)', border: '1px solid var(--border)',
                     color: workdirError ? 'var(--red)' : 'var(--text-2)',
                   }}>
                     {statusData?.workdir || '未初始化'}
@@ -794,30 +810,35 @@ export default function App() {
                     </span>
                   )}
                 </p>
-                <p style={{ color: 'var(--text-3)', fontSize: 12, margin: '0 0 20px' }}>
+                <p style={{ color: 'var(--text-3)', fontSize: 12, margin: '0 0 26px' }}>
                   点击顶部目录名可切换到其他项目 · 使用 + 号添加文件或选择模型
                 </p>
-                <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap', maxWidth: 560, margin: '0 auto' }}>
                   {['分析项目结构', '列出所有 Python 文件', '查找 TODO 注释', '解释 main.py 的功能'].map(hint => (
                     <button
                       key={hint}
                       onClick={() => handleSend(hint)}
                       style={{
-                        padding: '7px 14px', borderRadius: 999,
+                        padding: '8px 16px', borderRadius: 999,
                         border: '1px solid var(--border-hi)',
-                        background: 'var(--bg-raised)',
-                        color: 'var(--text-2)', fontSize: 12,
-                        cursor: 'pointer', transition: 'all 0.15s',
+                        background: 'var(--bg-surface)',
+                        boxShadow: 'var(--shadow-sm)',
+                        color: 'var(--text-2)', fontSize: 12.5,
+                        cursor: 'pointer', transition: 'all 0.18s ease',
                       }}
                       onMouseOver={e => {
-                        e.currentTarget.style.background = 'var(--bg-overlay)'
-                        e.currentTarget.style.color = 'var(--text-1)'
-                        e.currentTarget.style.borderColor = 'var(--accent)'
+                        e.currentTarget.style.background = 'var(--accent-soft)'
+                        e.currentTarget.style.color = 'var(--accent-2)'
+                        e.currentTarget.style.borderColor = 'var(--accent-border)'
+                        e.currentTarget.style.transform = 'translateY(-1px)'
+                        e.currentTarget.style.boxShadow = 'var(--shadow-md)'
                       }}
                       onMouseOut={e => {
-                        e.currentTarget.style.background = 'var(--bg-raised)'
+                        e.currentTarget.style.background = 'var(--bg-surface)'
                         e.currentTarget.style.color = 'var(--text-2)'
                         e.currentTarget.style.borderColor = 'var(--border-hi)'
+                        e.currentTarget.style.transform = 'translateY(0)'
+                        e.currentTarget.style.boxShadow = 'var(--shadow-sm)'
                       }}
                     >
                       {hint}

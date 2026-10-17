@@ -14,7 +14,7 @@ export function ThemeToggle() {
   return (
     <button
       onClick={handleToggle}
-      title={theme === 'beige' ? '切换深色主题' : '切换浅色主题'}
+      title={theme === 'light' ? '切换深色主题' : '切换浅色主题'}
       style={{
         width: 30, height: 30, borderRadius: 6,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -34,7 +34,7 @@ export function ThemeToggle() {
         e.currentTarget.style.borderColor = 'transparent'
       }}
     >
-      {theme === 'beige' ? <Moon size={ICON_MD} strokeWidth={1.8} /> : <Sun size={ICON_MD} strokeWidth={1.8} />}
+      {theme === 'light' ? <Moon size={ICON_MD} strokeWidth={1.8} /> : <Sun size={ICON_MD} strokeWidth={1.8} />}
     </button>
   )
 }

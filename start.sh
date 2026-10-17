@@ -27,18 +27,20 @@ stop_existing_port() {
   fi
 }
 
-# ── 检查 .env ─────────────────────────────────────
+# ── 检查 .env（可选）──────────────────────────────
+# 模型配置默认使用本地 Ollama（见 components/config.py），
+# 需要切换其他服务时再创建 .env 覆盖以下变量：
 if [ ! -f ".env" ]; then
-  echo -e "${YELLOW}⚠️  未找到 .env 文件，请创建并配置 ANTHROPIC_AUTH_TOKEN / MODEL_ID${NC}"
-  echo "示例 .env:"
-  echo "  ANTHROPIC_AUTH_TOKEN=sk-ant-..."
-  echo "  MODEL_ID=claude-sonnet-4-20250514"
-  echo "  # 可选: ANTHROPIC_BASE_URL=https://..."
+  echo -e "${YELLOW}ℹ️  未找到 .env，使用默认配置: 本地 Ollama (http://localhost:11434)${NC}"
+  echo "  如需覆盖，可在 .env 中设置:"
+  echo "    ANTHROPIC_BASE_URL=http://localhost:11434"
+  echo "    ANTHROPIC_AUTH_TOKEN=ollama"
+  echo "    MODEL_ID=qwen2.5:3b"
 fi
 
 # ── 后端 ──────────────────────────────────────────
-echo -e "${GREEN}▶ 启动后端 (http://localhost:5000)${NC}"
-stop_existing_port 5000
+echo -e "${GREEN}▶ 启动后端 (http://localhost:8000)${NC}"
+stop_existing_port 8000
 if command -v conda &>/dev/null && conda env list | grep -q "code_agent"; then
   conda run -n code_agent python api_server.py &
 else
@@ -52,7 +54,7 @@ echo -n "  等待后端就绪 "
 for i in $(seq 1 15); do
   sleep 1
   echo -n "."
-  if curl -sf http://localhost:5000/api/status >/dev/null 2>&1; then
+  if curl -sf http://localhost:8000/api/status >/dev/null 2>&1; then
     echo -e " ${GREEN}OK${NC}"
     break
   fi
@@ -69,7 +71,7 @@ echo "  前端 PID: $FRONTEND_PID"
 echo "────────────────────────────────────────────"
 echo -e "${GREEN}✅ 服务已启动${NC}"
 echo "  前端:  http://localhost:5173"
-echo "  后端:  http://localhost:5000"
+echo "  后端:  http://localhost:8000"
 echo ""
 echo "按 Ctrl+C 停止所有服务"
 
