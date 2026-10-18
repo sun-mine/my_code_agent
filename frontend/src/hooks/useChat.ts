@@ -78,13 +78,8 @@ export function useChat() {
     })
   }, [])
 
-  // Ensure a streaming assistant message exists, creating one if needed
-  const ensureStreamingMsg = useCallback((prev: ChatMessage[], overrides: Partial<ChatMessage> = {}) => {
-    if (streamingIdRef.current) return prev
-    const id = uuidv4()
-    streamingIdRef.current = id
-    return [...prev, { id, role: 'assistant' as const, content: '', ts: Date.now(), streaming: true, runId: currentRunIdRef.current ?? undefined, ...overrides }]
-  }, [])
+  // 注意：不要在 setMessages 的 updater 内部写 ref（StrictMode 双重执行会破坏状态）。
+  // 流式消息的 id 创建统一在各事件分支内、updater 之外完成。
 
   const handleEvent = useCallback((ev: AgentEvent) => {
     switch (ev.type) {
@@ -146,10 +141,22 @@ export function useChat() {
 
       case 'chunk': {
         const text = ev.text ?? ''
+        // 注意：id 与 ref 更新必须在 setMessages 的 updater 之外完成。
+        // StrictMode 下 updater 会被双重执行，updater 内的副作用（写 ref）
+        // 会导致第二次执行时跳过创建消息，后续 chunk 全部丢失。
+        let sid = streamingIdRef.current
+        const isNew = !sid
+        if (isNew) {
+          sid = uuidv4()
+          streamingIdRef.current = sid
+        }
+        const newId = sid!
         setMessages(prev => {
-          const msgs = ensureStreamingMsg(prev)
-          return msgs.map(m =>
-            m.id === streamingIdRef.current
+          if (isNew) {
+            return [...prev, { id: newId, role: 'assistant' as const, content: text, ts: Date.now(), streaming: true, runId: currentRunIdRef.current ?? undefined }]
+          }
+          return prev.map(m =>
+            m.id === newId
               ? { ...m, content: (typeof m.content === 'string' ? m.content : '') + text }
               : m
           )
@@ -160,10 +167,16 @@ export function useChat() {
       case 'thinking': {
         const text = ev.text ?? ''
         setAgentState('thinking')
+        // 与 chunk 相同：ref 副作用必须在 updater 外（StrictMode 双重执行安全）
+        let sid = streamingIdRef.current
+        const isNew = !sid
+        if (isNew) {
+          sid = uuidv4()
+          streamingIdRef.current = sid
+        }
+        const newId = sid!
         setMessages(prev => {
-          const msgs = ensureStreamingMsg(prev, { thinking: text, steps: [{ type: 'thinking', text }] })
-          return msgs.map(m => {
-            if (m.id !== streamingIdRef.current) return m
+          const apply = (m: ChatMessage): ChatMessage => {
             const steps = [...(m.steps || [])]
             const lastStep = steps[steps.length - 1]
             if (lastStep && lastStep.type === 'thinking') {
@@ -172,7 +185,11 @@ export function useChat() {
               steps.push({ type: 'thinking', text })
             }
             return { ...m, thinking: (m.thinking || '') + text, steps }
-          })
+          }
+          if (isNew) {
+            return [...prev, { id: newId, role: 'assistant' as const, content: '', ts: Date.now(), streaming: true, runId: currentRunIdRef.current ?? undefined, thinking: text, steps: [{ type: 'thinking' as const, text }] }]
+          }
+          return prev.map(m => (m.id === newId ? apply(m) : m))
         })
         break
       }
@@ -206,17 +223,24 @@ export function useChat() {
         }
 
         // Push tool_call step into the current streaming message
+        // ref 副作用在 updater 外完成（StrictMode 双重执行安全），且避免双重 append
+        let sid = streamingIdRef.current
+        const isNewMsg = !sid
+        if (isNewMsg) {
+          sid = uuidv4()
+          streamingIdRef.current = sid
+        }
+        const targetId = sid!
         setMessages(prev => {
-          const msgs = ensureStreamingMsg(prev, {
-            toolCalls: [tc],
-            steps: [{ type: 'tool_call', toolCall: tc }],
-          })
-          return msgs.map(m => {
-            if (m.id !== streamingIdRef.current) return m
+          if (isNewMsg) {
+            return [...prev, { id: targetId, role: 'assistant' as const, content: '', ts: Date.now(), streaming: true, runId: currentRunIdRef.current ?? undefined, toolCalls: [tc], steps: [{ type: 'tool_call' as const, toolCall: tc }] }]
+          }
+          return prev.map(m => {
+            if (m.id !== targetId) return m
             return {
               ...m,
               toolCalls: [...(m.toolCalls || []), tc],
-              steps: [...(m.steps || []), { type: 'tool_call', toolCall: tc }],
+              steps: [...(m.steps || []), { type: 'tool_call' as const, toolCall: tc }],
             }
           })
         })
@@ -358,7 +382,7 @@ export function useChat() {
       default:
         break
     }
-  }, [addFileChange, ensureStreamingMsg])
+  }, [addFileChange])
 
   const clearAll = useCallback(() => {
     setMessages([])
