@@ -404,6 +404,16 @@ class AgentLoop:
 
                 if not tool_blocks:
                     # No tool calls - end of turn
+                    if not round_text.strip():
+                        # 模型返回了空内容：给前端一个明确提示，避免"无反应"
+                        fallback = "（模型未返回内容，请重试或换一种问法）"
+                        self._emit({
+                            "type": "chunk",
+                            "text": fallback,
+                            "run_id": self._current_run_id,
+                            "ts": time.time(),
+                        })
+                        final_text = fallback
                     if plan_mode and plan_text.strip() and plan_todo_used:
                         self._emit({
                             "type": "plan_proposed",

@@ -109,6 +109,13 @@ export function useChat() {
             m.id === streamingIdRef.current ? { ...m, streaming: false } : m
           ))
           streamingIdRef.current = null
+        } else {
+          // 兜底：run 结束但没有任何流式消息，确保用户能看到一条回复
+          setMessages(prev => [...prev, {
+            id: uuidv4(), role: 'assistant',
+            content: '（未收到模型输出，请重试）', ts: Date.now(),
+            runId: ev.run_id,
+          }])
         }
         setToolCalls(prev => prev.map(tc =>
           tc.run_id === (ev.run_id ?? '') && tc.status === 'running'

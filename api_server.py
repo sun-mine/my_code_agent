@@ -2,6 +2,15 @@
 Web API 服务器 - ClaudeCode 风格前端的后端
 提供 RESTful API 和 WebSocket 实时事件推送
 """
+# gevent monkey patch 必须在所有其他导入之前执行，
+# 否则 threading/socket 相关模块不会被替换，后台线程 emit 会丢失事件
+try:
+    from gevent import monkey
+    monkey.patch_all()
+    _HAS_GEVENT = True
+except ImportError:
+    _HAS_GEVENT = False
+
 import json
 import os
 import sys
@@ -39,7 +48,9 @@ from core.subagent import run_subagent
 # ====== Flask & SocketIO ======
 app = Flask(__name__)
 CORS(app, origins="*")
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+# 优先使用 gevent（需安装 gevent + gevent-websocket），退化到 threading
+_async_mode = "gevent" if _HAS_GEVENT else "threading"
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode=_async_mode)
 
 # ====== 全局状态 ======
 _lock = threading.Lock()
@@ -1323,10 +1334,10 @@ def handle_ws_message(data):
     global _is_running, _run_thread, _current_mode
     message = (data.get("message") or "").strip()
     if not message or not agent_instance:
-        emit("error_event", {"message": "invalid request"})
+        emit("agent_event", {"type": "error", "message": "无效请求或 Agent 未初始化", "ts": time.time()})
         return
     if _is_running:
-        emit("error_event", {"message": "agent already running"})
+        emit("agent_event", {"type": "error", "message": "智能体正在运行中，请稍后再试", "ts": time.time()})
         return
 
     new_mode = data.get("mode", "auto")

@@ -8,5 +8,9 @@ flask-cors>=4.0.0
 flask-socketio>=5.3.0
 python-socketio>=5.10.0
 
+# 异步模式（推荐，提升 Socket.IO 实时推送可靠性）
+gevent>=24.0.0
+gevent-websocket>=0.10.1
+
 # 实用工具
 pathlib>=1.0.1
