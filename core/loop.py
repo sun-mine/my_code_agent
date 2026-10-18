@@ -578,6 +578,8 @@ class AgentLoop:
             })
         except Exception as e:
             # 非中断异常：先发 error 事件，再由 finally 发 run_end
+            import traceback
+            traceback.print_exc()  # 完整堆栈进服务日志，便于排查
             self._emit({
                 "type": "error",
                 "message": str(e),

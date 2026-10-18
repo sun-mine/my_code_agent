@@ -2,15 +2,6 @@
 Web API 服务器 - ClaudeCode 风格前端的后端
 提供 RESTful API 和 WebSocket 实时事件推送
 """
-# gevent monkey patch 必须在所有其他导入之前执行，
-# 否则 threading/socket 相关模块不会被替换，后台线程 emit 会丢失事件
-try:
-    from gevent import monkey
-    monkey.patch_all()
-    _HAS_GEVENT = True
-except ImportError:
-    _HAS_GEVENT = False
-
 import json
 import os
 import sys
@@ -48,9 +39,8 @@ from core.subagent import run_subagent
 # ====== Flask & SocketIO ======
 app = Flask(__name__)
 CORS(app, origins="*")
-# 优先使用 gevent（需安装 gevent + gevent-websocket），退化到 threading
-_async_mode = "gevent" if _HAS_GEVENT else "threading"
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode=_async_mode)
+# threading 模式：稳定可靠；断线重连与数据恢复由前端 useAgentSocket 自动处理
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 # ====== 全局状态 ======
 _lock = threading.Lock()

@@ -279,8 +279,8 @@ export default function App() {
     applyTheme((() => { try { const v = localStorage.getItem('code-agent-theme'); if (v === 'dark' || v === 'light') return v; if (v === 'beige') return 'light' } catch {} return 'dark' })())
   }, [])
 
-  // Restore conversation history on page load
-  useEffect(() => {
+  // Restore conversation history (页面加载 + socket 断线重连时都会调用)
+  const restoreHistory = () => {
     api.history().then(data => {
       if (data.history && data.history.length > 0) {
         const restored: ChatMessage[] = []
@@ -397,7 +397,10 @@ export default function App() {
         if (restored.length > 0) restoreMessages(restored)
       }
     }).catch(() => {})
-  }, [])  // eslint-disable-line react-hooks/exhaustive-deps
+  }  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 页面加载时恢复一次历史
+  useEffect(() => { restoreHistory() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const {
     messages, todos, toolCalls, agentState,
@@ -432,6 +435,7 @@ export default function App() {
   const { sendMessage, sendInterrupt } = useAgentSocket({
     onEvent: handleEvent,
     onStatusChange: setSocketStatus,
+    onReconnect: restoreHistory,
   })
 
   const { data: statusData, refetch: refetchStatus } = useQuery({
