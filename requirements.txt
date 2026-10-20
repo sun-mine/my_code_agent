@@ -1,12 +1,11 @@
-# 核心依赖
+# 模型客户端与环境变量配置
 anthropic>=0.30.0
 python-dotenv>=1.0.0
 
-# Web API 服务
+# Flask HTTP API 与跨域支持
 flask>=3.0.0
 flask-cors>=4.0.0
+
+# Socket.IO 实时消息
 flask-socketio>=5.3.0
 python-socketio>=5.10.0
-
-# 实用工具
-pathlib>=1.0.1

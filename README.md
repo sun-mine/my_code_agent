@@ -7,12 +7,34 @@
 <p align="center">
   <a href="https://github.com/sun-mine/my_code_agent"><img alt="GitHub repository" src="https://img.shields.io/badge/GitHub-my__code__agent-181717?style=flat-square&logo=github"></a>
   <img alt="Python" src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white">
+  <img alt="Flask" src="https://img.shields.io/badge/Flask-3.x-000000?style=flat-square&logo=flask&logoColor=white">
   <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black">
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-6-3178C6?style=flat-square&logo=typescript&logoColor=white">
+  <img alt="Vite" src="https://img.shields.io/badge/Vite-8-646CFF?style=flat-square&logo=vite&logoColor=white">
+  <img alt="Socket.IO" src="https://img.shields.io/badge/Socket.IO-real--time-010101?style=flat-square&logo=socketdotio&logoColor=white">
+  <img alt="Ollama" src="https://img.shields.io/badge/Ollama-local_models-111111?style=flat-square">
   <img alt="License" src="https://img.shields.io/badge/License-MIT-green?style=flat-square">
 </p>
 
 
 Code Agent 将对话、项目目录和代码工具放在同一个界面中。项目目录由你明确选择；之后可以在项目下创建多个对话，让智能体围绕当前项目读取代码、解释结构、搜索内容或执行修改。
+
+## 技术栈
+
+| 部分 | 技术 | 用途 |
+| --- | --- | --- |
+| 后端语言 | Python 3.10+ | Agent 主循环、工具执行和服务端业务逻辑 |
+| Web 服务 | Flask、Flask-CORS | 提供 HTTP API，并处理跨域配置 |
+| 实时通信 | Flask-SocketIO、python-socketio、Socket.IO Client | 推送流式回复、工具调用和运行状态 |
+| Agent 与模型接口 | Anthropic Python SDK、Anthropic Messages API 兼容服务 | 组织模型请求和工具调用；默认连接 Ollama |
+| 前端语言 | TypeScript 6、React 19 | 构建类型安全的交互式工作台 |
+| 前端构建 | Vite 8、`@vitejs/plugin-react` | 本地开发服务器和生产构建 |
+| UI 与样式 | Tailwind CSS 4、Radix UI、Lucide React | 样式工具、可访问的基础组件和图标 |
+| 前端数据 | TanStack Query、React Hooks | 请求缓存、界面状态和异步数据管理 |
+| Markdown 与代码 | React Markdown、remark-gfm、Shiki | 渲染 Markdown、GFM 和代码高亮 |
+| 默认模型服务 | Ollama（`qwen2.5:3b`） | 在本机运行模型；也可切换到兼容 Anthropic API 的服务 |
+
+Python 依赖位于 `requirements.txt`；前端依赖和版本锁定分别位于 `frontend/package.json` 与 `frontend/package-lock.json`。
 
 ## 界面预览
 
