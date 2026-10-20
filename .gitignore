@@ -1,22 +1,44 @@
 # Runtime state
 .agent/
+.transcripts/
+.errors/
+
+# Local configuration and environments
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+env/
 
 # Python
 __pycache__/
 *.py[cod]
 *.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
 
 # Node
 node_modules/
 frontend/dist/
+frontend/dist-ssr/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
 
 # IDE
 .vscode/
 .idea/
+*.swp
+*.swo
 
-# Logs & Transcripts
-.transcripts/
-.errors/
+# Logs
+*.log
 
 # OS
 .DS_Store

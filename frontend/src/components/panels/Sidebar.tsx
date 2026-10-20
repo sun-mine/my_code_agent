@@ -1,190 +1,238 @@
-import { useState, useEffect } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { MessageSquare, FolderTree, Plus, Trash2, FileText } from 'lucide-react'
+import { useState } from 'react'
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ChevronRight, Folder, MessageSquare, Plus, SquarePen, Trash2 } from 'lucide-react'
 import { api } from '../../lib/api'
-import { FileTree } from './FileTree'
-import type { SessionInfo } from '../../lib/types'
+import { FolderPicker } from './FolderPicker'
 
+interface ProjectInfo { path: string; name: string }
 interface SidebarProps {
-  onSelectFile: (path: string) => void
   onNewSession: () => void
+  onNewProjectSession: (path: string) => void
   onLoadSession: (sid: string) => void
+  onProjectChange: (path: string) => Promise<void>
   workdir?: string
-  onWorkdirChange?: (path: string) => void
 }
 
-type Tab = 'chats' | 'project'
+const PROJECTS_KEY = 'code-agent-projects'
+const HIDDEN_PROJECTS_KEY = 'code-agent-hidden-projects'
 
-export function Sidebar({ onSelectFile, onNewSession, onLoadSession, workdir, onWorkdirChange }: SidebarProps) {
-  const [tab, setTab] = useState<Tab>('project')
-  const qc = useQueryClient()
+function readProjects(): ProjectInfo[] {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(PROJECTS_KEY) || '[]')
+    if (!Array.isArray(value)) return []
+    return value.filter((item): item is ProjectInfo =>
+      !!item && typeof item.path === 'string' && typeof item.name === 'string'
+    )
+  } catch { return [] }
+}
 
-  const { data: sessionsData, refetch: refetchSessions } = useQuery({
-    queryKey: ['sessions'],
-    queryFn: () => api.sessions(),
+function saveProjects(projects: ProjectInfo[]) {
+  try { localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects)) } catch { /* storage may be disabled */ }
+}
+
+function projectName(path: string) {
+  return path.replace(/[\\/]$/, '').split(/[\\/]/).filter(Boolean).at(-1) || path
+}
+
+function ProjectRow({ project, active, expanded, onToggle, onProjectChange, onRemoveProject, onNewSession, onLoadSession }: {
+  project: ProjectInfo
+  active: boolean
+  expanded: boolean
+  onToggle: (path: string) => void
+  onProjectChange: (path: string) => Promise<void>
+  onRemoveProject: (path: string) => void
+  onNewSession: (path: string) => void
+  onLoadSession: (sid: string) => void
+}) {
+  const queryClient = useQueryClient()
+  const { data } = useQuery({
+    queryKey: ['sessions', project.path],
+    queryFn: () => api.sessions(project.path),
+    enabled: expanded,
     refetchInterval: 10000,
   })
 
-  const handleDeleteSession = async (sid: string, e: React.MouseEvent) => {
-    e.stopPropagation()
+  const selectSession = async (sid: string) => {
     try {
-      await api.deleteSession(sid)
-      refetchSessions()
-    } catch {
-      // ignore
-    }
+      if (!active) await onProjectChange(project.path)
+      onLoadSession(sid)
+    } catch { /* leave the current project selected if switching fails */ }
   }
 
-  const formatTime = (ts: number) => {
-    const d = new Date(ts * 1000)
-    const now = new Date()
-    const diff = now.getTime() - d.getTime()
-    if (diff < 3600000) return `${Math.round(diff / 60000)}分前`
-    if (diff < 86400000) return `${Math.round(diff / 3600000)}小时前`
-    return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
+  const deleteSession = async (sid: string, event: React.MouseEvent) => {
+    event.stopPropagation()
+    try {
+      await api.deleteSession(sid, project.path)
+      await queryClient.invalidateQueries({ queryKey: ['sessions'] })
+    } catch { /* keep the session visible when deletion fails */ }
   }
 
   return (
-    <aside style={{
-      width: 280, flexShrink: 0,
-      borderRight: '1px solid var(--border)',
-      background: 'var(--bg-surface)',
-      display: 'flex', flexDirection: 'column',
-      overflow: 'hidden',
-    }}>
-      {/* ── New Session Button ──────────────────── */}
-      <div style={{ padding: '12px 12px 10px' }}>
-        <button
-          onClick={onNewSession}
-          style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-            width: '100%', padding: '9px 0', borderRadius: 10,
-            background: 'linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%)',
-            border: 'none',
-            color: '#fff', fontSize: 13, fontWeight: 600, letterSpacing: '0.02em',
-            cursor: 'pointer', transition: 'all 0.18s ease',
-            boxShadow: 'var(--shadow-sm), inset 0 1px 0 rgba(255,255,255,.18)',
-          }}
-          onMouseOver={e => {
-            e.currentTarget.style.transform = 'translateY(-1px)'
-            e.currentTarget.style.boxShadow = 'var(--shadow-md), inset 0 1px 0 rgba(255,255,255,.18)'
-          }}
-          onMouseOut={e => {
-            e.currentTarget.style.transform = 'translateY(0)'
-            e.currentTarget.style.boxShadow = 'var(--shadow-sm), inset 0 1px 0 rgba(255,255,255,.18)'
-          }}
-        >
-          <Plus size={16} strokeWidth={2.4} />
-          新建对话
+    <div className="project-row">
+      <div className={`project-entry${active ? ' active' : ''}`}>
+        <button className="project-entry-main" onClick={() => { onToggle(project.path); if (!active) void onProjectChange(project.path).catch(() => {}) }} title={project.path}>
+          <Folder size={15} />
+          <span>{project.name}</span>
+          {active && <i className="project-active-dot" />}
+        </button>
+        <button className="project-add-chat" title="在此项目中新建对话" aria-label={`在 ${project.name} 中新建对话`} onClick={() => onNewSession(project.path)}>
+          <Plus size={14} />
+        </button>
+        <button className="project-remove" title="从项目列表移除" aria-label={`从项目列表移除 ${project.name}`} onClick={() => onRemoveProject(project.path)}>
+          <Trash2 size={13} />
+        </button>
+      </div>
+      {expanded && (
+        <div className="project-chats">
+          {(data?.sessions ?? []).length === 0 ? (
+            <div className="project-no-chats">暂无对话</div>
+          ) : (data?.sessions ?? []).map(session => (
+            <div key={session.id} className="project-chat-row">
+              <button className="project-chat-entry" onClick={() => void selectSession(session.id)} title={session.title}>
+                <MessageSquare size={12} /><span>{session.title}</span>
+              </button>
+              <button className="project-chat-delete" onClick={event => void deleteSession(session.id, event)} title="删除对话" aria-label={`删除对话 ${session.title}`}><Trash2 size={12} /></button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export function Sidebar({ onNewSession, onNewProjectSession, onLoadSession, onProjectChange, workdir }: SidebarProps) {
+  const [savedProjects, setSavedProjects] = useState<ProjectInfo[]>(readProjects)
+  const [hiddenProjects, setHiddenProjects] = useState<string[]>(() => {
+    try {
+      const value: unknown = JSON.parse(localStorage.getItem(HIDDEN_PROJECTS_KEY) || '[]')
+      return Array.isArray(value) ? value.filter((path): path is string => typeof path === 'string') : []
+    } catch { return [] }
+  })
+  const [expandedPath, setExpandedPath] = useState(workdir || '')
+  const [recentOpen, setRecentOpen] = useState(false)
+  const [pickingFolder, setPickingFolder] = useState(false)
+
+  const projects = savedProjects.filter(project => !hiddenProjects.includes(project.path))
+  if (workdir && !hiddenProjects.includes(workdir) && !projects.some(project => project.path === workdir)) {
+    projects.unshift({ path: workdir, name: projectName(workdir) })
+  }
+
+  const recentQueries = useQueries({
+    queries: projects.map(project => ({
+      queryKey: ['sessions', project.path],
+      queryFn: () => api.sessions(project.path),
+      enabled: recentOpen,
+      refetchInterval: 10000,
+    })),
+  })
+  const recentSessions = recentQueries.flatMap(result => result.data?.sessions ?? [])
+    .sort((a, b) => b.updated_at - a.updated_at)
+  const queryClient = useQueryClient()
+
+  const deleteRecentSession = async (sid: string, sessionWorkdir: string | undefined, event: React.MouseEvent) => {
+    event.stopPropagation()
+    try {
+      await api.deleteSession(sid, sessionWorkdir || workdir)
+      await queryClient.invalidateQueries({ queryKey: ['sessions'] })
+    } catch { /* keep the session visible when deletion fails */ }
+  }
+
+  const loadRecentSession = async (sid: string, sessionWorkdir?: string) => {
+    try {
+      if (sessionWorkdir && sessionWorkdir !== workdir) await onProjectChange(sessionWorkdir)
+      onLoadSession(sid)
+    } catch { /* keep the current project selected if switching fails */ }
+  }
+
+  const rememberProject = (project: ProjectInfo) => {
+    setHiddenProjects(previous => {
+      const next = previous.filter(path => path !== project.path)
+      try { localStorage.setItem(HIDDEN_PROJECTS_KEY, JSON.stringify(next)) } catch { /* storage may be disabled */ }
+      return next
+    })
+    setSavedProjects(previous => {
+      const next = [project, ...previous.filter(item => item.path !== project.path)]
+      saveProjects(next)
+      return next
+    })
+  }
+
+  const removeProject = (path: string) => {
+    setSavedProjects(previous => {
+      const next = previous.filter(project => project.path !== path)
+      saveProjects(next)
+      return next
+    })
+    setHiddenProjects(previous => {
+      const next = previous.includes(path) ? previous : [...previous, path]
+      try { localStorage.setItem(HIDDEN_PROJECTS_KEY, JSON.stringify(next)) } catch { /* storage may be disabled */ }
+      return next
+    })
+  }
+
+  const selectProjectFolder = async (path: string) => {
+    if (path !== workdir) await onProjectChange(path)
+    if (workdir && !hiddenProjects.includes(workdir)) rememberProject({ path: workdir, name: projectName(workdir) })
+    rememberProject({ path, name: projectName(path) })
+    setExpandedPath(path)
+    setPickingFolder(false)
+  }
+
+  return (
+    <aside className="app-sidebar">
+      <div className="sidebar-actions">
+        <button className="sidebar-new-chat" onClick={onNewSession}>
+          <SquarePen size={16} />
+          <span>新聊天</span>
+          <kbd>⌘ K</kbd>
         </button>
       </div>
 
-      {/* ── Tab Switcher (segmented) ───────────── */}
-      <div style={{
-        display: 'flex', gap: 2,
-        margin: '0 12px 8px', padding: 3,
-        background: 'var(--bg-raised)',
-        border: '1px solid var(--border)',
-        borderRadius: 9,
-      }}>
-        {([
-          { key: 'chats', icon: MessageSquare, label: '对话' },
-          { key: 'project', icon: FolderTree, label: '项目' },
-        ] as const).map(t => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            style={{
-              flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
-              padding: '6px 0', fontSize: 12, fontWeight: tab === t.key ? 600 : 400,
-              background: tab === t.key ? 'var(--bg-overlay)' : 'transparent',
-              border: tab === t.key ? '1px solid var(--border-hi)' : '1px solid transparent',
-              boxShadow: tab === t.key ? 'var(--shadow-sm)' : 'none',
-              color: tab === t.key ? 'var(--text-1)' : 'var(--text-3)',
-              cursor: 'pointer', borderRadius: 7,
-              transition: 'all 0.15s',
-            }}
-          >
-            <t.icon size={13} />
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {/* ── Tab Content ────────────────────────── */}
-      <div style={{ flex: 1, overflow: 'auto' }}>
-        {tab === 'chats' && (
-          <div style={{ padding: '4px 0' }}>
-            <p style={{
-              fontSize: 10, color: 'var(--text-3)', padding: '4px 14px 8px',
-              textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0,
-            }}>
-              最近会话
-            </p>
-            {(sessionsData?.sessions ?? []).length === 0 && (
-              <p style={{
-                fontSize: 12, color: 'var(--text-3)', textAlign: 'center',
-                padding: '20px 14px', margin: 0,
-              }}>
-                暂无历史会话
-              </p>
-            )}
-            {(sessionsData?.sessions ?? []).map(s => (
-              <button
-                key={s.id}
-                onClick={() => onLoadSession(s.id)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  width: '100%', padding: '8px 14px',
-                  background: 'none', border: 'none',
-                  cursor: 'pointer', textAlign: 'left',
-                  transition: 'all 0.15s',
-                }}
-                onMouseOver={e => { e.currentTarget.style.background = 'var(--bg-raised)' }}
-                onMouseOut={e => { e.currentTarget.style.background = 'none' }}
-              >
-                <FileText size={14} color="var(--text-3)" style={{ flexShrink: 0 }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{
-                    fontSize: 12, color: 'var(--text-1)',
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    marginBottom: 2,
-                  }}>
-                    {s.title}
-                  </div>
-                  <div style={{ fontSize: 10, color: 'var(--text-3)', display: 'flex', gap: 8 }}>
-                    <span>{formatTime(s.updated_at)}</span>
-                    <span>{s.message_count} 条消息</span>
-                  </div>
-                </div>
-                <button
-                  onClick={(e) => handleDeleteSession(s.id, e)}
-                  title="删除会话"
-                  style={{
-                    background: 'none', border: 'none', cursor: 'pointer',
-                    color: 'var(--text-3)', padding: 2, display: 'flex',
-                    opacity: 0.5,
-                  }}
-                  onMouseOver={e => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.color = 'var(--red)' }}
-                  onMouseOut={e => { e.currentTarget.style.opacity = '0.5'; e.currentTarget.style.color = 'var(--text-3)' }}
-                >
-                  <Trash2 size={12} />
-                </button>
-              </button>
-            ))}
-          </div>
-        )}
-
-        {tab === 'project' && (
-          <div style={{ padding: '4px 0' }}>
-            <FileTree
-              onSelectFile={onSelectFile}
-              workdir={workdir}
-              onWorkdirChange={onWorkdirChange}
+      <div className="sidebar-scroll">
+        <div className="sidebar-group-title"><span>项目</span><button title="添加项目文件夹" aria-label="添加项目文件夹" onClick={() => setPickingFolder(true)}><Plus size={15} /></button></div>
+        <div className="sidebar-project-list">
+          {projects.map(project => (
+            <ProjectRow
+              key={project.path}
+              project={project}
+              active={project.path === workdir}
+              expanded={expandedPath === project.path}
+              onToggle={path => setExpandedPath(current => current === path ? '' : path)}
+              onRemoveProject={removeProject}
+              onProjectChange={async path => {
+                if (workdir && !hiddenProjects.includes(workdir)) rememberProject({ path: workdir, name: projectName(workdir) })
+                rememberProject({ path, name: projectName(path) })
+                await onProjectChange(path)
+              }}
+              onNewSession={path => {
+                if (workdir && !hiddenProjects.includes(workdir)) rememberProject({ path: workdir, name: projectName(workdir) })
+                rememberProject({ path: project.path, name: project.name })
+                onNewProjectSession(path)
+              }}
+              onLoadSession={onLoadSession}
             />
+          ))}
+          {projects.length === 0 && <div className="sidebar-empty-project">先选择工作目录或新建项目</div>}
+        </div>
+
+        <button className="sidebar-recent-toggle" onClick={() => setRecentOpen(value => !value)} aria-expanded={recentOpen}>
+          <span>最近</span><ChevronRight size={14} className={recentOpen ? 'rotated' : ''} />
+        </button>
+        {recentOpen && (
+          <div className="sidebar-recent-list">
+            {recentSessions.slice(0, 12).map(session => (
+              <div key={session.id} className="project-chat-row">
+                <button className="project-chat-entry" onClick={() => void loadRecentSession(session.id, session.workdir)} title={session.title}>
+                  <MessageSquare size={12} /><span>{session.title}</span>
+                </button>
+                <button className="project-chat-delete" onClick={event => void deleteRecentSession(session.id, session.workdir, event)} title="删除对话" aria-label={`删除对话 ${session.title}`}><Trash2 size={12} /></button>
+              </div>
+            ))}
+            {recentSessions.length === 0 && <div className="project-no-chats">暂无最近对话</div>}
           </div>
         )}
       </div>
+      {pickingFolder && <FolderPicker initialPath={workdir} onSelect={selectProjectFolder} onClose={() => setPickingFolder(false)} />}
     </aside>
   )
 }

@@ -17,7 +17,15 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
     headers: { 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
   })
-  const json: ApiResponse<T> = await r.json()
+  let json: ApiResponse<T>
+  try {
+    json = await r.json()
+  } catch {
+    if ((path === '/fs/mkdir' || path === '/fs/touch') && r.status === 404) {
+      throw new Error('文件创建接口尚未加载，请重启 Python 后端服务后重试')
+    }
+    throw new Error(`服务器返回了无法解析的响应（HTTP ${r.status}）`)
+  }
   if (!json.success) throw new Error(json.error || 'API error')
   return json.data as T
 }
@@ -122,16 +130,20 @@ export const api = {
     post<FileDiff>('/files/diff', { path }),
 
   // ── Sessions ───────────────────────────────────
-  sessions: () => get<{ sessions: Array<{ id: string; title: string; created_at: number; updated_at: number; message_count: number; workdir: string }> }>('/sessions'),
+  sessions: (workdir?: string) => get<{ sessions: Array<{ id: string; title: string; created_at: number; updated_at: number; message_count: number; workdir: string }> }>('/sessions', workdir ? { workdir } : undefined),
   createSession: (id: string, title: string, messageCount: number) =>
     post<{ id: string; title: string }>('/sessions', { id, title, message_count: messageCount }),
   getSession: (sid: string) => get<{ id: string; title: string; history: Array<{ role: string; content: unknown }> }>(`/sessions/${sid}`),
   loadSession: (sid: string) => post<{ history: Array<{ role: string; content: unknown }>; title: string; workdir: string }>(`/sessions/${sid}/load`),
-  deleteSession: (sid: string) => del<{ deleted: string }>(`/sessions/${sid}`),
+  deleteSession: (sid: string, workdir?: string) => del<{ deleted: string }>(`/sessions/${sid}${workdir ? `?workdir=${encodeURIComponent(workdir)}` : ''}`),
   recentErrors: (limit = 20) =>
     get<unknown[]>('/errors/recent', { limit: String(limit) }),
 
   // ── Filesystem browser (server-side) ───────────
   fsLs: (path?: string) =>
     get<{ path: string; parent: string | null; items: Array<{ name: string; path: string }> }>('/fs/ls', path ? { path } : {}),
+  fsMkdir: (path: string, name: string) =>
+    post<{ path: string; name: string }>('/fs/mkdir', { path, name }),
+  fsTouch: (path: string, name: string) =>
+    post<{ path: string; name: string }>('/fs/touch', { path, name }),
 }

@@ -767,16 +767,27 @@ export default function App() {
 
         {/* Left sidebar: sessions + file tree */}
         <Sidebar
-          onSelectFile={(path) => setSelectedFile(path)}
           onNewSession={handleNewSession}
+          onNewProjectSession={async path => {
+            try {
+              await handleNewSession()
+              if (statusData?.workdir !== path) {
+                await api.setWorkdir(path)
+                handleWorkdirChanged()
+              }
+            } catch {
+              setWorkdirError(true)
+            }
+          }}
           onLoadSession={handleLoadSession}
           workdir={statusData?.workdir}
-          onWorkdirChange={async (dirPath) => {
+          onProjectChange={async dirPath => {
             try {
               await api.setWorkdir(dirPath)
               handleWorkdirChanged()
-            } catch {
+            } catch (error) {
               setWorkdirError(true)
+              throw error
             }
           }}
         />

@@ -769,10 +769,11 @@ def clear_history():
 
 # ====== 会话管理 ======
 
-def _get_sessions_dir() -> Path:
+def _get_sessions_dir(workdir: str = None) -> Path:
     """返回 workdir/.agent/sessions/，退化到 CWD/.sessions/"""
-    if agent_config and agent_config.get("workdir"):
-        p = Path(agent_config["workdir"]) / ".agent" / "sessions"
+    root = workdir or (agent_config.get("workdir") if agent_config else None)
+    if root:
+        p = Path(root).expanduser().resolve() / ".agent" / "sessions"
     else:
         p = Path(".sessions")
     p.mkdir(parents=True, exist_ok=True)
@@ -782,7 +783,7 @@ def _get_sessions_dir() -> Path:
 @app.route("/api/sessions")
 def list_sessions():
     sessions = []
-    d = _get_sessions_dir()
+    d = _get_sessions_dir(request.args.get("workdir"))
     for f in sorted(d.glob("session_*.json"), key=lambda x: x.stat().st_mtime, reverse=True):
         try:
             data = json.loads(f.read_text())
@@ -863,7 +864,7 @@ def get_session(sid):
 
 @app.route("/api/sessions/<sid>", methods=["DELETE"])
 def delete_session(sid):
-    session_file = _get_sessions_dir() / f"{sid}.json"
+    session_file = _get_sessions_dir(request.args.get("workdir")) / f"{sid}.json"
     if not session_file.exists():
         return _err("session not found", 404)
     session_file.unlink()
@@ -1111,6 +1112,47 @@ def fs_ls():
         pass
     parent = str(target.parent) if target.parent != target else None
     return _ok({"path": str(target), "parent": parent, "items": items})
+
+
+@app.route("/api/fs/mkdir", methods=["POST"])
+def fs_mkdir():
+    """Create a child directory from the folder picker."""
+    data = request.get_json(force=True) or {}
+    parent = Path((data.get("path") or "").strip()).expanduser().resolve()
+    name = (data.get("name") or "").strip()
+    if not parent.is_dir():
+        return _err("当前目录不存在")
+    if not name or name in {".", ".."} or Path(name).name != name or "/" in name or "\\" in name or "\x00" in name:
+        return _err("请输入有效的文件夹名称")
+    target = parent / name
+    try:
+        target.mkdir()
+    except FileExistsError:
+        return _err("同名文件夹已存在")
+    except OSError as e:
+        return _err(str(e))
+    return _ok({"path": str(target.resolve()), "name": name})
+
+
+@app.route("/api/fs/touch", methods=["POST"])
+def fs_touch():
+    """Create an empty file from the folder picker without overwriting."""
+    data = request.get_json(force=True) or {}
+    parent = Path((data.get("path") or "").strip()).expanduser().resolve()
+    name = (data.get("name") or "").strip()
+    if not parent.is_dir():
+        return _err("当前目录不存在")
+    if not name or name in {".", ".."} or Path(name).name != name or "/" in name or "\\" in name or "\x00" in name:
+        return _err("请输入有效的文件名")
+    target = parent / name
+    try:
+        with target.open("x", encoding="utf-8"):
+            pass
+    except FileExistsError:
+        return _err("同名文件或文件夹已存在")
+    except OSError as e:
+        return _err(str(e))
+    return _ok({"path": str(target.resolve()), "name": name})
 
 
 @app.route("/api/files/tree")
