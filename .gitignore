@@ -25,6 +25,7 @@ dist/
 
 # Node
 node_modules/
+frontend/.vite/
 frontend/dist/
 frontend/dist-ssr/
 npm-debug.log*
