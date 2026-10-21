@@ -8,7 +8,9 @@ import sys
 import threading
 import time
 import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -31,6 +33,7 @@ from components.team_manager import TeammateManager
 from components.background_manager import BackgroundManager
 from components.skill_loader import SkillLoader
 from components.compactor import estimate_tokens
+from components.session_store import SessionStore, to_jsonable
 from core.loop import AgentLoop
 from tools import get_all_tools, create_all_handlers, get_core_tools, get_tools_by_categories, create_handlers_for_categories, get_all_categories
 from tools.base import set_workdir
@@ -43,7 +46,8 @@ CORS(app, origins="*")
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 # ====== 全局状态 ======
-_lock = threading.Lock()
+_lock = threading.RLock()
+_agent_init_lock = threading.RLock()
 agent_instance: AgentLoop = None
 conversation_history = []
 memory_manager: MemoryManager = None
@@ -59,10 +63,35 @@ _agent_lock = threading.Lock()   # 防止并发 run
 _is_running = False              # Agent 当前是否在运行
 _cfg: Config = None              # 缓存 config，用于动态重建 system prompt
 _skills: SkillLoader = None      # 缓存 skills，用于动态重建 system prompt
+_session_store: Optional[SessionStore] = None
+_session_stores: Dict[str, SessionStore] = {}
+_active_session_id: Optional[str] = None
+_active_store_key: Optional[str] = None
+
+
+@dataclass
+class RunContext:
+    session_id: str
+    run_id: str
+    history: list
+    baseline_history: list
+    agent: AgentLoop
+    mode: str
+    workdir: str
+    title: str
+    store: SessionStore
+    baseline_length: int
+    event_seq: int = 0
+    events: List[Dict[str, Any]] = field(default_factory=list)
+    pending_run_end: Optional[Dict[str, Any]] = None
+
+
+_running_ctx: Optional[RunContext] = None
 
 # ====== 工具审批状态 ======
-_pending_approvals: dict = {}   # tool_use_id -> (threading.Event, [bool])
+_pending_approvals: dict = {}   # tool_use_id -> approval metadata
 _approval_lock = threading.Lock()
+_approval_timeout_seconds = 120.0
 _current_mode: str = "auto"     # plan | auto | manual
 
 # 工具危险级别
@@ -94,7 +123,7 @@ def _is_dangerous_command(cmd: str) -> bool:
     return False
 
 
-def _should_approve(tool_name: str, tool_input: dict = None) -> bool:
+def _should_approve(tool_name: str, tool_input: dict = None, mode: str = None) -> bool:
     """根据当前模式和工具类型判断是否需要审批"""
     if tool_name in _SAFE_TOOLS:
         return False  # 安全工具永远不需要审批
@@ -105,54 +134,117 @@ def _should_approve(tool_name: str, tool_input: dict = None) -> bool:
         if _is_dangerous_command(cmd):
             return True  # 高危命令始终需要审批
 
-    if _current_mode == "auto":
+    selected_mode = mode or _current_mode
+    if selected_mode == "auto":
         return False  # Auto 模式：非高危操作全自动
-    if _current_mode == "plan":
+    if selected_mode == "plan":
         return False  # Plan 执行阶段：非高危操作全自动
 
     # Manual 模式：写操作和命令都需要审批
-    if _current_mode == "manual":
+    if selected_mode == "manual":
         return tool_name in _WRITE_TOOLS or tool_name in _COMMAND_TOOLS
 
     return False
 
 
 def _push_event(event: dict):
-    """将 AgentLoop 事件推送到所有 SocketIO 客户端"""
+    """Fallback callback used before a run-specific callback is installed."""
+    with _lock:
+        context = _running_ctx
+    if context:
+        _push_run_event(context, event)
+        return
     socketio.emit("agent_event", event)
 
 
-def _approval_callback(tool_use_id: str, name: str, inp: dict) -> bool:
-    """工具执行前请求用户审批，根据模式和工具类型决定是否阻塞"""
-    if not _should_approve(name, inp):
-        return True  # 不需要审批，直接通过
+def _push_run_event(context: RunContext, event: dict):
+    """Attach immutable run ownership and a monotonic session sequence."""
+    owned = dict(to_jsonable(event))
+    with _lock:
+        if owned.get("type") == "run_end":
+            context.pending_run_end = owned
+            return
+        context.event_seq += 1
+        owned["session_id"] = context.session_id
+        owned["run_id"] = context.run_id
+        owned["event_seq"] = context.event_seq
+        context.events.append(owned)
+    socketio.emit("agent_event", owned)
 
-    # 真正需要审批时才推送事件给前端
+
+def _emit_request_error(message: str, session_id: str = None):
+    sid = session_id or _active_session_id
+    with _lock:
+        if _running_ctx and _running_ctx.session_id == sid:
+            context = _running_ctx
+        else:
+            context = None
+            record, store = _resolve_session(sid)
+            seq = int(record.get("event_seq", 0)) + 1 if record else 1
+            if record:
+                record["event_seq"] = seq
+                try:
+                    store.save(record)
+                except Exception:
+                    app.logger.exception("Failed to persist request error sequence")
+    if context:
+        _push_run_event(context, {"type": "error", "message": message, "ts": time.time()})
+        return
     socketio.emit("agent_event", {
-        "type": "tool_approval_request",
-        "name": name,
-        "input": inp,
-        "tool_use_id": tool_use_id,
+        "type": "error",
+        "message": message,
+        "session_id": sid,
+        "run_id": None,
+        "event_seq": seq,
         "ts": time.time(),
     })
 
-    event = threading.Event()
-    result = [True]
-    with _approval_lock:
-        _pending_approvals[tool_use_id] = (event, result)
 
-    # 每秒轮询一次，以便响应中断信号
-    deadline = time.time() + 120
-    while time.time() < deadline:
-        if event.wait(timeout=1.0):
-            break
-        if agent_instance and agent_instance._interrupt_flag.is_set():
-            result[0] = False
-            break
+def _approval_callback_for(context: RunContext):
+    def callback(tool_use_id: str, name: str, inp: dict) -> bool:
+        if not _should_approve(name, inp, context.mode):
+            return True
 
-    with _approval_lock:
-        _pending_approvals.pop(tool_use_id, None)
-    return result[0]
+        event = threading.Event()
+        result = [False]
+        with _approval_lock:
+            _pending_approvals[tool_use_id] = {
+                "event": event,
+                "result": result,
+                "session_id": context.session_id,
+                "run_id": context.run_id,
+            }
+        _push_run_event(context, {
+            "type": "tool_approval_request",
+            "name": name,
+            "input": inp,
+            "tool_use_id": tool_use_id,
+            "ts": time.time(),
+        })
+
+        deadline = time.time() + _approval_timeout_seconds
+        while time.time() < deadline:
+            remaining = max(deadline - time.time(), 0)
+            if event.wait(timeout=min(0.1, remaining)):
+                break
+            if context.agent._interrupt_flag.is_set():
+                result[0] = False
+                break
+
+        with _approval_lock:
+            _pending_approvals.pop(tool_use_id, None)
+        return result[0]
+
+    return callback
+
+
+def _approval_callback(tool_use_id: str, name: str, inp: dict) -> bool:
+    """Compatibility callback; normal runs install a context-bound callback."""
+    with _lock:
+        context = _running_ctx
+    if not context:
+        return False
+    return _approval_callback_for(context)(tool_use_id, name, inp)
 
 
 def _build_environment_context(workdir: str) -> str:
@@ -305,12 +397,12 @@ Skills available: {skills.descriptions()}"""
     return "\n\n".join([block1, block2, block3, block4])
 
 
-def init_agent(workdir: str = None):
+def init_agent(workdir: str = None, session_id: str = None):
     """初始化所有组件"""
     global agent_instance, conversation_history
     global memory_manager, safety_manager, error_manager
     global todo_manager, task_manager, team_manager, bg_manager, agent_config
-    global _cfg, _skills
+    global _cfg, _skills, _active_session_id, _active_store_key, _session_store
 
     cfg = Config(workdir=workdir)
     _cfg = cfg  # 缓存供动态重建 system prompt 使用
@@ -404,7 +496,26 @@ def init_agent(workdir: str = None):
         "tool_definitions_len": len(json.dumps(tools, default=str)),
         "token_threshold": cfg.token_threshold,
     }
-    conversation_history = []
+    store = _store_for_workdir(str(cfg.workdir))
+    _session_store = store
+    store_key = _store_key(str(cfg.workdir))
+    selected_id = session_id
+    if selected_id is None and _active_store_key == store_key:
+        selected_id = _active_session_id
+    selected = store.get(selected_id) if selected_id else None
+    if selected is None or selected.get("workdir") != str(cfg.workdir):
+        selected = store.create(workdir=str(cfg.workdir), mode=_current_mode)
+    _active_session_id = selected["id"]
+    _active_store_key = store_key
+    conversation_history = selected.get("history", [])
+
+
+def ensure_agent_initialized(workdir: str = None, session_id: str = None):
+    """Initialize the Agent once, including when Flask is hosted by an app server."""
+    with _agent_init_lock:
+        if agent_instance is not None and workdir is None:
+            return
+        init_agent(workdir=workdir, session_id=session_id)
 
 
 # ====== Helper ======
@@ -419,7 +530,294 @@ def _err(msg, code=400):
 
 def _require_agent():
     if not agent_instance:
+        try:
+            ensure_agent_initialized()
+        except Exception as exc:
+            app.logger.exception("Agent initialization failed")
+            return _err(f"Agent initialization failed: {exc}", 503)
+    if not agent_instance:
         return _err("Agent not initialized", 503)
+
+
+def _store_key(workdir: str) -> str:
+    return str(Path(workdir).expanduser().resolve())
+
+
+def _store_for_workdir(workdir: str) -> SessionStore:
+    key = _store_key(workdir)
+    store = _session_stores.get(key)
+    if store is None:
+        store = SessionStore(Path(key) / ".agent" / "sessions")
+        _session_stores[key] = store
+    return store
+
+
+def _resolve_session(session_id: str = None, workdir: str = None):
+    sid = session_id or _active_session_id
+    if not sid:
+        return None, None
+    if workdir:
+        store = _store_for_workdir(workdir)
+        return store.get(sid), store
+    if _running_ctx and _running_ctx.session_id == sid:
+        return _running_ctx.store.get(sid), _running_ctx.store
+    if sid == _active_session_id and _active_store_key:
+        store = _session_stores.get(_active_store_key)
+        if store:
+            record = store.get(sid)
+            if record is not None:
+                return record, store
+    for store in list(_session_stores.values()):
+        record = store.get(sid)
+        if record is not None:
+            return record, store
+    return None, None
+
+
+def _get_record(session_id: str = None, workdir: str = None):
+    record, _store = _resolve_session(session_id, workdir)
+    return record
+
+
+def _make_title(message: str) -> str:
+    return " ".join(message.split())[:80]
+
+
+def _session_snapshot(session_id: str = None):
+    with _lock:
+        sid = session_id or _active_session_id
+        record = _get_record(sid)
+        if record is None:
+            return None
+        context = _running_ctx if _running_ctx and _running_ctx.session_id == sid else None
+        if context:
+            history = to_jsonable(context.baseline_history)
+            events = to_jsonable(context.events)
+            event_seq = context.event_seq
+            run_id = context.run_id
+        else:
+            history = to_jsonable(record.get("history", []))
+            events = []
+            event_seq = int(record.get("event_seq", 0))
+            run_id = None
+        return {
+            "session_id": sid,
+            "history": history,
+            "total": len(history),
+            "title": record.get("title", ""),
+            "workdir": record.get("workdir", ""),
+            "mode": record.get("mode", "auto"),
+            "running": context is not None,
+            "run_id": run_id,
+            "events": events,
+            "event_seq": event_seq,
+        }
+
+
+def _persist_unfinished_stream(context: RunContext):
+    """Materialize only streamed assistant rounds not already appended by AgentLoop."""
+    groups = []
+    current = None
+    for event in context.events:
+        if event.get("type") == "agent_state" and event.get("state") == "thinking":
+            current = {"text": [], "thinking": []}
+            groups.append(current)
+        elif event.get("type") in {"chunk", "thinking"}:
+            if current is None:
+                current = {"text": [], "thinking": []}
+                groups.append(current)
+            value = event.get("text", "")
+            if value:
+                key = "text" if event["type"] == "chunk" else "thinking"
+                current[key].append(value)
+
+    completed_assistant_rounds = sum(
+        1 for message in context.history[context.baseline_length:]
+        if message.get("role") == "assistant"
+    )
+    unfinished = groups[completed_assistant_rounds:]
+    partial_text = "".join(
+        part for group in unfinished for part in group["text"]
+    )
+    partial_thinking = "".join(
+        part for group in unfinished for part in group["thinking"]
+    )
+    if not partial_text and not partial_thinking:
+        return
+
+    content = []
+    if partial_thinking:
+        content.append({
+            "type": "text",
+            "text": f"[Partial thinking before interruption]\n{partial_thinking}",
+        })
+    if partial_text:
+        content.append({"type": "text", "text": partial_text})
+    context.history.append({"role": "assistant", "content": content})
+
+
+def _owned_terminal_event(context: RunContext, event: dict, event_seq: int):
+    owned = dict(to_jsonable(event))
+    owned["session_id"] = context.session_id
+    owned["run_id"] = context.run_id
+    owned["event_seq"] = event_seq
+    owned.setdefault("ts", time.time())
+    return owned
+
+
+def _finish_run(context: RunContext):
+    global _running_ctx, _is_running, _run_thread, conversation_history
+    _persist_unfinished_stream(context)
+    record = context.store.get(context.session_id) or {
+        "id": context.session_id,
+        "created_at": time.time(),
+    }
+    terminal_raw = context.pending_run_end or {"type": "run_end", "ts": time.time()}
+    terminal_seq = context.event_seq + 1
+    record.update({
+        "history": context.history,
+        "title": context.title,
+        "workdir": context.workdir,
+        "mode": context.mode,
+        "event_seq": terminal_seq,
+    })
+
+    persistence_error = None
+    try:
+        context.store.save(record)
+        context.event_seq = terminal_seq
+        terminal = _owned_terminal_event(context, terminal_raw, terminal_seq)
+    except Exception as exc:
+        app.logger.exception("Failed to persist session %s", context.session_id)
+        persistence_error = _owned_terminal_event(context, {
+            "type": "error",
+            "message": f"Failed to save session: {exc}",
+            "ts": time.time(),
+        }, context.event_seq + 1)
+        context.event_seq += 2
+        record["event_seq"] = context.event_seq
+        context.store.retain(record)
+        terminal = _owned_terminal_event(context, terminal_raw, context.event_seq)
+
+    with _lock:
+        if _running_ctx is context:
+            _running_ctx = None
+            _is_running = False
+            _run_thread = None
+        if (_active_session_id == context.session_id
+                and _active_store_key == _store_key(context.workdir)):
+            conversation_history = context.history
+
+    if persistence_error:
+        socketio.emit("agent_event", persistence_error)
+    socketio.emit("agent_event", terminal)
+
+
+def _execute_run(context: RunContext, plan_mode: bool):
+    try:
+        context.agent.run(context.history, run_id=context.run_id, plan_mode=plan_mode)
+    except Exception as exc:
+        app.logger.exception("Agent run failed")
+        _push_run_event(context, {
+            "type": "error",
+            "message": str(exc),
+            "ts": time.time(),
+        })
+    finally:
+        _finish_run(context)
+
+
+def _start_run(
+    session_id: str,
+    content: str,
+    mode: str,
+    plan_mode: bool,
+    title_message: str = "",
+):
+    """Atomically admit one run and bind every mutable dependency to it."""
+    global _active_session_id, _active_store_key, _current_mode, _is_running, _running_ctx
+    global _run_thread, conversation_history, _session_store
+
+    selected_mode = mode if mode in {"plan", "auto", "manual"} else "auto"
+    with _lock:
+        if _running_ctx is not None:
+            return None, "agent is already running", 409
+        record, store = _resolve_session(session_id or _active_session_id)
+        if record is None:
+            return None, "session not found", 404
+        sid = record["id"]
+        workdir = record.get("workdir") or (agent_config or {}).get("workdir", "")
+
+        current_workdir = (agent_config or {}).get("workdir", "")
+        if workdir and workdir != current_workdir:
+            try:
+                ensure_agent_initialized(workdir=workdir, session_id=sid)
+            except Exception as exc:
+                app.logger.exception("Agent initialization failed")
+                return None, f"Agent initialization failed: {exc}", 503
+            record, store = _resolve_session(sid, workdir)
+
+        history = list(record.get("history", []))
+        had_user_message = any(item.get("role") == "user" for item in history)
+        history.append({"role": "user", "content": content})
+        title = record.get("title", "")
+        if title_message and not had_user_message:
+            title = _make_title(title_message)
+
+        run_id = str(uuid.uuid4())
+        context = RunContext(
+            session_id=sid,
+            run_id=run_id,
+            history=history,
+            baseline_history=to_jsonable(history),
+            agent=agent_instance,
+            mode=selected_mode,
+            workdir=workdir,
+            title=title,
+            store=store,
+            baseline_length=len(history),
+            event_seq=int(record.get("event_seq", 0)),
+        )
+        try:
+            record.update({
+                "history": history,
+                "title": title,
+                "workdir": workdir,
+                "mode": selected_mode,
+                "event_seq": context.event_seq,
+            })
+            store.save(record)
+        except Exception as exc:
+            app.logger.exception("Failed to save session before run")
+            return None, f"Failed to save session: {exc}", 500
+
+        _active_session_id = sid
+        _active_store_key = _store_key(workdir)
+        _session_store = store
+        _current_mode = selected_mode
+        conversation_history = history
+        context.agent.event_callback = lambda event: _push_run_event(context, event)
+        context.agent.approval_callback = _approval_callback_for(context)
+        if _cfg and _skills and hasattr(context.agent, "system"):
+            context.agent.system = _build_system_prompt(_cfg, _skills, selected_mode)
+
+        _running_ctx = context
+        _is_running = True
+        thread = threading.Thread(
+            target=_execute_run,
+            args=(context, plan_mode),
+            daemon=True,
+        )
+        _run_thread = thread
+        try:
+            thread.start()
+        except Exception as exc:
+            _running_ctx = None
+            _is_running = False
+            _run_thread = None
+            return None, f"Failed to start agent: {exc}", 500
+
+    return {"run_id": run_id, "session_id": sid, "status": "started"}, None, 200
 
 
 # ====== 系统 ======
@@ -429,8 +827,10 @@ def get_status():
     r = _require_agent()
     if r:
         return r
+    snapshot = _session_snapshot()
+    active_history = snapshot["history"] if snapshot else conversation_history
     # Token usage estimate
-    estimated = estimate_tokens(conversation_history)
+    estimated = estimate_tokens(active_history)
     threshold = agent_instance.token_threshold if agent_instance else 100000
 
     # Token breakdown by category
@@ -468,10 +868,13 @@ def get_status():
 
     return _ok({
         "agent_state": agent_instance.state,
-        "run_id": agent_instance.current_run_id,
+        "run_id": _running_ctx.run_id if _running_ctx else None,
+        "session_id": _active_session_id,
+        "running_session_id": _running_ctx.session_id if _running_ctx else None,
+        "running_run_id": _running_ctx.run_id if _running_ctx else None,
         "workdir": agent_config["workdir"] if agent_config else "",
         "model": agent_config["model"] if agent_config else "",
-        "history_length": len(conversation_history),
+        "history_length": len(active_history),
         "token_usage": token_usage,
         "token_breakdown": token_breakdown,
         "memory_stats": memory_manager.get_memory_stats() if memory_manager else {},
@@ -490,40 +893,17 @@ def chat():
     message = (data.get("message") or "").strip()
     if not message:
         return _err("message required")
-    if _is_running:
-        return _err("agent is already running", 409)
-
-    global _current_mode
     new_mode = data.get("mode", "auto")
-    if new_mode in ("plan", "auto", "manual"):
-        _current_mode = new_mode
-        # 动态更新 system prompt 以反映当前模式
-        if agent_instance and _cfg and _skills:
-            agent_instance.system = _build_system_prompt(_cfg, _skills, _current_mode)
-
-    run_id = str(uuid.uuid4())
-    conversation_history.append({"role": "user", "content": message})
-
-    def _run():
-        global _is_running
-        _is_running = True
-        try:
-            agent_instance.run(conversation_history, run_id=run_id, plan_mode=(_current_mode == "plan"))
-        except Exception as e:
-            socketio.emit("agent_event", {
-                "type": "error",
-                "message": str(e),
-                "run_id": run_id,
-                "ts": time.time(),
-            })
-        finally:
-            _is_running = False
-
-    global _run_thread
-    _run_thread = threading.Thread(target=_run, daemon=True)
-    _run_thread.start()
-
-    return _ok({"run_id": run_id, "status": "started"})
+    result, error, status = _start_run(
+        data.get("session_id"),
+        message,
+        new_mode,
+        plan_mode=(new_mode == "plan"),
+        title_message=message,
+    )
+    if error:
+        return _err(error, status)
+    return _ok(result)
 
 
 # ====== Plan 执行 ======
@@ -534,21 +914,11 @@ def plan_execute():
     r = _require_agent()
     if r:
         return r
-    if _is_running:
-        return _err("agent is already running", 409)
-
     data = request.get_json(force=True)
     plan_content = (data.get("plan_content") or "").strip()
     todos = data.get("todos") or []
     if not plan_content:
         return _err("plan_content required")
-
-    global _current_mode
-    _current_mode = "auto"
-    if agent_instance and _cfg and _skills:
-        agent_instance.system = _build_system_prompt(_cfg, _skills, "auto")
-
-    run_id = str(uuid.uuid4())
 
     # 注入后端指令，不作为用户消息
     todo_lines = "\n".join(
@@ -565,28 +935,13 @@ def plan_execute():
         f"已批准的计划：\n{plan_content}\n"
         f"</plan-execute>"
     )
-    conversation_history.append({"role": "user", "content": execute_instruction})
-
-    def _run():
-        global _is_running
-        _is_running = True
-        try:
-            agent_instance.run(conversation_history, run_id=run_id, plan_mode=False)
-        except Exception as e:
-            socketio.emit("agent_event", {
-                "type": "error",
-                "message": str(e),
-                "run_id": run_id,
-                "ts": time.time(),
-            })
-        finally:
-            _is_running = False
-
-    global _run_thread
-    _run_thread = threading.Thread(target=_run, daemon=True)
-    _run_thread.start()
-
-    return _ok({"run_id": run_id, "status": "executing"})
+    result, error, status = _start_run(
+        data.get("session_id"), execute_instruction, "auto", plan_mode=False
+    )
+    if error:
+        return _err(error, status)
+    result["status"] = "executing"
+    return _ok(result)
 
 
 @app.route("/api/chat/interrupt", methods=["POST"])
@@ -594,8 +949,23 @@ def interrupt_chat():
     r = _require_agent()
     if r:
         return r
-    agent_instance.interrupt()
-    return _ok({"interrupted": True})
+    data = request.get_json(silent=True) or {}
+    with _lock:
+        context = _running_ctx
+        if context is None:
+            return _err("agent is not running", 409)
+        requested_session = data.get("session_id")
+        requested_run = data.get("run_id")
+        if requested_session and requested_session != context.session_id:
+            return _err("session does not own the running agent", 409)
+        if requested_run and requested_run != context.run_id:
+            return _err("run does not match the running agent", 409)
+        context.agent.interrupt()
+        return _ok({
+            "interrupted": True,
+            "session_id": context.session_id,
+            "run_id": context.run_id,
+        })
 
 
 @app.route("/api/chat/tool_approve", methods=["POST"])
@@ -603,16 +973,27 @@ def tool_approve():
     """批准或拒绝一个工具调用"""
     data = request.get_json(force=True)
     tool_use_id = (data.get("tool_use_id") or "").strip()
-    approved = bool(data.get("approved", True))
+    approved = data.get("approved") is True
     if not tool_use_id:
         return _err("tool_use_id required")
     with _approval_lock:
         entry = _pending_approvals.get(tool_use_id)
     if entry:
-        event, result = entry
+        requested_session = data.get("session_id")
+        requested_run = data.get("run_id")
+        if requested_session and requested_session != entry["session_id"]:
+            return _err("session does not own this approval", 409)
+        if requested_run and requested_run != entry["run_id"]:
+            return _err("run does not own this approval", 409)
+        event, result = entry["event"], entry["result"]
         result[0] = approved
         event.set()
-        return _ok({"tool_use_id": tool_use_id, "approved": approved})
+        return _ok({
+            "tool_use_id": tool_use_id,
+            "approved": approved,
+            "session_id": entry["session_id"],
+            "run_id": entry["run_id"],
+        })
     return _err("no pending approval found", 404)
 
 
@@ -697,8 +1078,11 @@ def set_model():
         allowed = ("claude-", "deepseek-", "deepseek-v4-")
         if not any(new_model.startswith(p) for p in allowed):
             return _err(f"unsupported model: {new_model}")
-    agent_instance.model = new_model
-    agent_config["model"] = new_model
+    with _lock:
+        if _running_ctx is not None:
+            return _err("agent is running", 409)
+        agent_instance.model = new_model
+        agent_config["model"] = new_model
     return _ok({"model": new_model, "message": "model switched"})
 
 
@@ -715,9 +1099,6 @@ def get_workdir():
 @app.route("/api/workdir", methods=["POST"])
 def change_workdir():
     """(重)初始化 agent 与工作目录"""
-    global conversation_history, _is_running
-    if _is_running:
-        return _err("agent is running, please interrupt first", 409)
     data = request.get_json(force=True)
     new_dir = (data.get("workdir") or "").strip()
     if not new_dir:
@@ -725,195 +1106,239 @@ def change_workdir():
     p = Path(new_dir).expanduser().resolve()
     if not p.is_dir():
         return _err(f"directory not found: {p}", 404)
-    try:
-        init_agent(workdir=str(p))
-        conversation_history = []
-        return _ok({"workdir": str(p), "message": "re-initialized"})
-    except Exception as e:
-        return _err(str(e), 500)
+    with _lock:
+        if _running_ctx is not None:
+            return _err("agent is running, please interrupt first", 409)
+        try:
+            ensure_agent_initialized(workdir=str(p))
+            return _ok({
+                "workdir": str(p),
+                "message": "re-initialized",
+                "session_id": _active_session_id,
+            })
+        except Exception as e:
+            return _err(str(e), 500)
 
 
 @app.route("/api/history")
 def get_history():
-    serializable = []
-    for msg in conversation_history[-200:]:
-        content = msg.get("content")
-        if isinstance(content, list):
-            parts = []
-            for blk in content:
-                _val = lambda k, d=None: blk.get(k, d) if isinstance(blk, dict) else getattr(blk, k, d)
-                if _val("text") is not None and _val("type") != "thinking":
-                    parts.append({"type": "text", "text": _val("text")})
-                elif _val("type") == "tool_use":
-                    parts.append({"type": "tool_use", "name": _val("name", ""), "tool_use_id": _val("id", ""), "input": _val("input", {})})
-                elif _val("type") == "tool_result":
-                    parts.append({"type": "tool_result", "tool_use_id": _val("tool_use_id", ""), "content": str(_val("content", ""))[:500]})
-                elif _val("type") == "thinking":
-                    parts.append({"type": "thinking", "text": _val("thinking", "") or _val("text", "")})
-                else:
-                    parts.append({"type": _val("type", "unknown")})
-            serializable.append({"role": msg["role"], "content": parts})
-        else:
-            serializable.append({"role": msg["role"], "content": content})
-    return _ok({"history": serializable, "total": len(conversation_history)})
+    r = _require_agent()
+    if r:
+        return r
+    snapshot = _session_snapshot(request.args.get("session_id"))
+    if snapshot is None:
+        return _err("session not found", 404)
+    return _ok(snapshot)
 
 
 @app.route("/api/history", methods=["DELETE"])
 def clear_history():
     global conversation_history
-    conversation_history = []
-    if agent_instance:
-        agent_instance.reset_interrupt()
-    return _ok()
+    r = _require_agent()
+    if r:
+        return r
+    data = request.get_json(silent=True) or {}
+    sid = data.get("session_id") or request.args.get("session_id") or _active_session_id
+    with _lock:
+        if _running_ctx and _running_ctx.session_id == sid:
+            return _err("cannot clear a running session", 409)
+        record, store = _resolve_session(sid, request.args.get("workdir"))
+        if record is None:
+            return _err("session not found", 404)
+        try:
+            record["history"] = []
+            store.save(record)
+        except Exception as exc:
+            return _err(f"Failed to clear session: {exc}", 500)
+        if sid == _active_session_id:
+            conversation_history = []
+    return _ok({"session_id": sid})
 
 
 # ====== 会话管理 ======
 
 def _get_sessions_dir(workdir: str = None) -> Path:
-    """返回 workdir/.agent/sessions/，退化到 CWD/.sessions/"""
+    """Compatibility helper for callers that inspect the session directory."""
     root = workdir or (agent_config.get("workdir") if agent_config else None)
     if root:
-        p = Path(root).expanduser().resolve() / ".agent" / "sessions"
-    else:
-        p = Path(".sessions")
-    p.mkdir(parents=True, exist_ok=True)
-    return p
+        return _store_for_workdir(root).directory
+    if _session_store is not None:
+        return _session_store.directory
+    return Path(".").resolve() / ".agent" / "sessions"
 
 
 @app.route("/api/sessions")
 def list_sessions():
-    sessions = []
-    d = _get_sessions_dir(request.args.get("workdir"))
-    for f in sorted(d.glob("session_*.json"), key=lambda x: x.stat().st_mtime, reverse=True):
-        try:
-            data = json.loads(f.read_text())
-            sessions.append({
-                "id": data.get("id", f.stem),
-                "title": data.get("title", ""),
-                "created_at": data.get("created_at", 0),
-                "updated_at": data.get("updated_at", 0),
-                "message_count": data.get("message_count", 0),
-                "workdir": data.get("workdir", ""),
-            })
-        except Exception:
-            pass
+    r = _require_agent()
+    if r:
+        return r
+    with _lock:
+        workdir = request.args.get("workdir") or (agent_config or {}).get("workdir", os.getcwd())
+        store = _store_for_workdir(workdir)
+        running_sid = (
+            _running_ctx.session_id
+            if _running_ctx and _running_ctx.store is store else None
+        )
+        records = store.list()
+    sessions = [{
+        "id": item["id"],
+        "title": item.get("title", ""),
+        "created_at": item.get("created_at", 0),
+        "updated_at": item.get("updated_at", 0),
+        "message_count": item.get("message_count", len(item.get("history", []))),
+        "workdir": item.get("workdir", ""),
+        "mode": item.get("mode", "auto"),
+        "running": item["id"] == running_sid,
+    } for item in records]
     return _ok({"sessions": sessions})
 
 
 @app.route("/api/sessions", methods=["POST"])
 def create_session():
-    """保存当前会话到 .sessions/"""
+    """Legacy save endpoint; never rebind a running session's history."""
+    r = _require_agent()
+    if r:
+        return r
     data = request.get_json(force=True)
-    sid = data.get("id") or f"session_{int(time.time())}"
+    sid = data.get("id") or _active_session_id or SessionStore.new_id()
     title = (data.get("title") or "").strip()
-    title = title[:80] if title else f"会话 {time.strftime('%m-%d %H:%M')}"
+    with _lock:
+        record, store = _resolve_session(sid)
+        if store is None:
+            store = _store_for_workdir((agent_config or {}).get("workdir", os.getcwd()))
+        try:
+            if record is None:
+                snapshot = _session_snapshot()
+                record = store.create(
+                    session_id=sid,
+                    title=title,
+                    created_at=data.get("created_at"),
+                    workdir=(agent_config or {}).get("workdir", os.getcwd()),
+                    mode=_current_mode,
+                    history=(snapshot or {}).get("history", []),
+                )
+            elif title:
+                record["title"] = title[:80]
+                record = store.save(record)
+        except Exception as exc:
+            return _err(f"Failed to save session: {exc}", 500)
+    return _ok({"id": sid, "title": record.get("title", "")})
 
-    def _serialize_content(content) -> str:
-        """序列化消息内容为可存储的字符串"""
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):
-            texts = []
-            for blk in content:
-                if isinstance(blk, dict):
-                    if blk.get("type") == "text":
-                        texts.append(blk.get("text", ""))
-                    elif blk.get("type") == "tool_use":
-                        texts.append(f"[工具调用: {blk.get('name', 'unknown')}]")
-                    elif blk.get("type") == "tool_result":
-                        txt = str(blk.get("content", ""))
-                        texts.append(txt[:500])
-                elif hasattr(blk, "text"):
-                    texts.append(blk.text)
-                elif hasattr(blk, "type") and getattr(blk, "type", "") == "tool_use":
-                    texts.append(f"[工具调用: {getattr(blk, 'name', 'unknown')}]")
-            return "\n".join(texts) if texts else "[complex content]"
-        return str(content)[:2000]
 
-    session_file = _get_sessions_dir() / f"{sid}.json"
-    payload = {
-        "id": sid,
-        "title": title,
-        "created_at": data.get("created_at", time.time()),
-        "updated_at": time.time(),
-        "message_count": data.get("message_count", 0),
-        "workdir": agent_config.get("workdir", "") if agent_config else "",
-        "history": [
-            {
-                "role": m["role"],
-                "content": _serialize_content(m["content"]),
-            }
-            for m in conversation_history[-200:]
-        ],
-        "mode": _current_mode,
-    }
-    session_file.write_text(json.dumps(payload, ensure_ascii=False, default=str))
-    return _ok({"id": sid, "title": title})
+@app.route("/api/sessions/new", methods=["POST"])
+def new_session():
+    global _active_session_id, _active_store_key, conversation_history, _current_mode
+    global _session_store
+    r = _require_agent()
+    if r:
+        return r
+    data = request.get_json(silent=True) or {}
+    requested_workdir = data.get("workdir") or (agent_config or {}).get("workdir", os.getcwd())
+    target = Path(requested_workdir).expanduser().resolve()
+    if not target.is_dir():
+        return _err(f"directory not found: {target}", 404)
+    mode = data.get("mode", "auto")
+    if mode not in {"auto", "plan", "manual"}:
+        mode = "auto"
+
+    with _lock:
+        if _running_ctx and str(target) != _running_ctx.workdir:
+            return _err("cannot switch workspace while agent is running", 409)
+        try:
+            store = _store_for_workdir(str(target))
+            record = store.create(workdir=str(target), mode=mode)
+            if _running_ctx is None and str(target) != (agent_config or {}).get("workdir", ""):
+                ensure_agent_initialized(workdir=str(target), session_id=record["id"])
+            else:
+                _active_session_id = record["id"]
+                _active_store_key = _store_key(str(target))
+                _session_store = store
+                conversation_history = []
+                if _running_ctx is None:
+                    _current_mode = mode
+        except Exception as exc:
+            if 'record' in locals():
+                store.delete(record["id"])
+            app.logger.exception("Failed to create session")
+            return _err(f"Failed to create session: {exc}", 500)
+    return _ok(_session_snapshot(record["id"]))
 
 
 @app.route("/api/sessions/<sid>")
 def get_session(sid):
-    session_file = _get_sessions_dir() / f"{sid}.json"
-    if not session_file.exists():
+    r = _require_agent()
+    if r:
+        return r
+    record, _store = _resolve_session(sid, request.args.get("workdir"))
+    if record is None:
         return _err("session not found", 404)
-    try:
-        return _ok(json.loads(session_file.read_text()))
-    except Exception as e:
-        return _err(str(e))
+    return _ok(to_jsonable(record))
 
 
 @app.route("/api/sessions/<sid>", methods=["DELETE"])
 def delete_session(sid):
-    session_file = _get_sessions_dir(request.args.get("workdir")) / f"{sid}.json"
-    if not session_file.exists():
-        return _err("session not found", 404)
-    session_file.unlink()
-    return _ok({"deleted": sid})
+    global _active_session_id, _active_store_key, conversation_history, _session_store
+    r = _require_agent()
+    if r:
+        return r
+    with _lock:
+        if _running_ctx and _running_ctx.session_id == sid:
+            return _err("cannot delete a running session", 409)
+        record, store = _resolve_session(sid, request.args.get("workdir"))
+        if record is None:
+            return _err("session not found", 404)
+        try:
+            store.delete(sid)
+            if _active_session_id == sid and _active_store_key == _store_key(record["workdir"]):
+                replacement = store.create(
+                    workdir=record.get("workdir") or (agent_config or {}).get("workdir", os.getcwd()),
+                    mode=record.get("mode", "auto"),
+                )
+                _active_session_id = replacement["id"]
+                _active_store_key = _store_key(record["workdir"])
+                _session_store = store
+                conversation_history = []
+        except Exception as exc:
+            return _err(f"Failed to delete session: {exc}", 500)
+    return _ok({"deleted": sid, "session_id": _active_session_id})
 
 
 @app.route("/api/sessions/<sid>/load", methods=["POST"])
 def load_session(sid):
-    """恢复会话历史到当前 agent，隔离会话状态"""
-    global conversation_history
-    session_file = _get_sessions_dir() / f"{sid}.json"
-    if not session_file.exists():
-        return _err("session not found", 404)
-    try:
-        data = json.loads(session_file.read_text())
-        history = data.get("history", [])
-        conversation_history = history
-
-        # 清空 todo 列表和任务状态，确保会话隔离
-        if todo_manager:
-            todo_manager.items.clear()
-        if task_manager:
-            for f in task_manager.dir.glob("task_*.json"):
-                try:
-                    d = json.loads(f.read_text())
-                    if d.get("status") == "in_progress":
-                        d["status"] = "pending"
-                        f.write_text(json.dumps(d, ensure_ascii=False))
-                except Exception:
-                    pass
-
-        # 恢复工作目录（如果会话中有记录且不同）
-        saved_workdir = data.get("workdir", "")
-        if saved_workdir and agent_config and saved_workdir != agent_config.get("workdir", ""):
-            p = Path(saved_workdir)
-            if p.is_dir():
-                try:
-                    init_agent(workdir=str(p))
-                except Exception:
-                    pass
-
-        return _ok({
-            "history": history,
-            "title": data.get("title", ""),
-            "workdir": data.get("workdir", ""),
-            "mode": data.get("mode", "auto"),
-        })
-    except Exception as e:
-        return _err(str(e))
+    """Select a session without mutating a different session's active run."""
+    global conversation_history, _active_session_id, _active_store_key, _current_mode
+    global _session_store
+    r = _require_agent()
+    if r:
+        return r
+    data = request.get_json(silent=True) or {}
+    requested_workdir = data.get("workdir") or request.args.get("workdir")
+    with _lock:
+        record, store = _resolve_session(sid, requested_workdir)
+        if record is None:
+            return _err("session not found", 404)
+        workdir = record.get("workdir", "")
+        if _running_ctx and workdir != _running_ctx.workdir:
+            return _err("cannot switch workspace while agent is running", 409)
+        try:
+            if _running_ctx is None and workdir != (agent_config or {}).get("workdir", ""):
+                p = Path(workdir).expanduser().resolve()
+                if not p.is_dir():
+                    return _err(f"directory not found: {p}", 404)
+                ensure_agent_initialized(workdir=str(p), session_id=sid)
+            else:
+                _active_session_id = sid
+                _active_store_key = _store_key(workdir)
+                _session_store = store
+                conversation_history = list(record.get("history", []))
+                if _running_ctx is None:
+                    _current_mode = record.get("mode", "auto")
+                    if todo_manager:
+                        todo_manager.items.clear()
+        except Exception as exc:
+            app.logger.exception("Failed to load session")
+            return _err(f"Failed to load session: {exc}", 500)
+    return _ok(_session_snapshot(sid))
 
 
 # ====== 任务 ======
@@ -1097,7 +1522,7 @@ def save_plan():
 def fs_ls():
     """列出服务器端任意目录（用于文件夹选择器）"""
     path = request.args.get("path", "").strip() or os.path.expanduser("~")
-    target = Path(path).resolve()
+    target = Path(path).expanduser().resolve()
     if not target.exists() or not target.is_dir():
         return _err("directory not found", 404)
     exclude = {"__pycache__", ".git", "node_modules"}
@@ -1363,52 +1788,62 @@ def handle_connect():
 
 @socketio.on("send_message")
 def handle_ws_message(data):
-    global _is_running, _run_thread, _current_mode
+    data = data or {}
     message = (data.get("message") or "").strip()
-    if not message or not agent_instance:
-        emit("agent_event", {"type": "error", "message": "无效请求或 Agent 未初始化", "ts": time.time()})
+    try:
+        ensure_agent_initialized()
+    except Exception as exc:
+        _emit_request_error(f"Agent initialization failed: {exc}", data.get("session_id"))
         return
-    if _is_running:
-        emit("agent_event", {"type": "error", "message": "智能体正在运行中，请稍后再试", "ts": time.time()})
+    if not message:
+        _emit_request_error("无效请求", data.get("session_id"))
         return
-
     new_mode = data.get("mode", "auto")
-    if new_mode in ("plan", "auto", "manual"):
-        _current_mode = new_mode
-
-    run_id = str(uuid.uuid4())
-    conversation_history.append({"role": "user", "content": message})
-
-    def _run():
-        global _is_running
-        _is_running = True
-        try:
-            agent_instance.run(conversation_history, run_id=run_id, plan_mode=(_current_mode == "plan"))
-        except Exception as e:
-            socketio.emit("agent_event", {
-                "type": "error", "message": str(e),
-                "run_id": run_id, "ts": time.time(),
-            })
-        finally:
-            _is_running = False
-
-    _run_thread = threading.Thread(target=_run, daemon=True)
-    _run_thread.start()
-    emit("run_started", {"run_id": run_id})
+    result, error, _status = _start_run(
+        data.get("session_id"),
+        message,
+        new_mode,
+        plan_mode=(new_mode == "plan"),
+        title_message=message,
+    )
+    if error:
+        _emit_request_error(error, data.get("session_id"))
+        return
+    snapshot = _session_snapshot(result["session_id"])
+    emit("run_started", {
+        **result,
+        "event_seq": snapshot["event_seq"] if snapshot else 0,
+    })
 
 
 @socketio.on("interrupt")
-def handle_interrupt(_data=None):
-    if agent_instance:
-        agent_instance.interrupt()
-        emit("interrupted", {"ts": time.time()})
+def handle_interrupt(data=None):
+    data = data or {}
+    with _lock:
+        context = _running_ctx
+        if context is None:
+            _emit_request_error("agent is not running", data.get("session_id"))
+            return
+        if data.get("session_id") and data["session_id"] != context.session_id:
+            _emit_request_error("session does not own the running agent", data["session_id"])
+            return
+        if data.get("run_id") and data["run_id"] != context.run_id:
+            _emit_request_error("run does not match the running agent", context.session_id)
+            return
+        context.agent.interrupt()
+        emit("interrupt_requested", {
+            "session_id": context.session_id,
+            "run_id": context.run_id,
+            "event_seq": context.event_seq,
+            "ts": time.time(),
+        })
 
 
 # ====== 启动 ======
 
 def run_server(host="0.0.0.0", port=8000, debug=False):
     print("正在初始化 Agent...")
-    init_agent()
+    ensure_agent_initialized()
     print(f"API 服务启动: http://{host}:{port}")
     socketio.run(app, host=host, port=port, debug=debug, allow_unsafe_werkzeug=True)
 

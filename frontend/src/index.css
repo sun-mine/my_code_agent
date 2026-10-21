@@ -1,99 +1,71 @@
 @import "tailwindcss";
 
-/* ── 设计令牌（科技黑 · 深色默认） ─────────────── */
-:root {
-  --bg-base:    #04070c;
-  --bg-surface: #080d15;
-  --bg-raised:  #0d1420;
-  --bg-overlay: #121b2a;
-  --border:     rgba(110,180,255,.09);
-  --border-hi:  rgba(110,180,255,.18);
-  --text-1:     #e8eef7;
-  --text-2:     #93a3bb;
-  --text-3:     #55637a;
-  --accent:     #22d3ee;
-  --accent-2:   #0ea5e9;
-  --accent-soft:   rgba(34,211,238,.12);
-  --accent-border: rgba(34,211,238,.38);
-  --green:      #34d399;
-  --yellow:     #fbbf24;
-  --red:        #fb7185;
-  --blue:       #38bdf8;
-  --radius:     8px;
-  --radius-lg:  12px;
-  --font-mono:  "Fira Code","JetBrains Mono","Cascadia Code",ui-monospace,monospace;
-  --shadow-sm:  0 1px 2px rgba(0,0,0,.4);
-  --shadow-md:  0 4px 16px rgba(0,0,0,.45);
-  --shadow-lg:  0 12px 40px rgba(0,0,0,.55);
-  --ring:       rgba(34,211,238,.45);
-  --badge-green:  rgba(52,211,153,.15);
-  --badge-yellow: rgba(251,191,36,.15);
-  --badge-red:    rgba(251,113,133,.15);
-  --badge-blue:   rgba(56,189,248,.15);
-  --badge-accent: rgba(34,211,238,.14);
-  --badge-gray:   rgba(85,99,122,.15);
+/* Calm surfaces, clear type, and one restrained accent. */
+:root, [data-theme="dark"] {
+  color-scheme: dark;
+  --bg-base: #111514;
+  --bg-surface: #181d1b;
+  --bg-raised: #202824;
+  --bg-overlay: #252e29;
+  --border: rgba(181,207,193,.10);
+  --border-hi: rgba(181,207,193,.19);
+  --text-1: #ecf0ed;
+  --text-2: #b2beb6;
+  --text-3: #83958a;
+  --accent: #8bd5bd;
+  --accent-2: #abe5d1;
+  --on-accent: #142b23;
+  --accent-soft: rgba(139,213,189,.08);
+  --accent-border: rgba(139,213,189,.28);
+  --green: #8bd5bd;
+  --yellow: #d7b985;
+  --red: #ed9b9b;
+  --blue: #9dbed8;
+  --radius: 10px;
+  --radius-lg: 16px;
+  --font-mono: "SFMono-Regular", "JetBrains Mono", "Cascadia Code", ui-monospace, monospace;
+  --shadow-sm: 0 2px 6px rgba(0,0,0,.12);
+  --shadow-md: 0 8px 30px rgba(0,0,0,.16);
+  --shadow-lg: 0 20px 60px rgba(0,0,0,.28);
+  --ring: rgba(139,213,189,.65);
+  --badge-green: rgba(139,213,189,.10);
+  --badge-yellow: rgba(215,185,133,.10);
+  --badge-red: rgba(237,155,155,.10);
+  --badge-blue: rgba(157,190,216,.10);
+  --badge-accent: rgba(139,213,189,.10);
+  --badge-gray: rgba(181,207,193,.07);
 }
 
-/* ── 科技黑（显式深色） ─────────────────────── */
-[data-theme="dark"] {
-  --bg-base:    #070b12;
-  --bg-surface: #0b111c;
-  --bg-raised:  #101a29;
-  --bg-overlay: #172437;
-  --border:     rgba(116,170,230,.12);
-  --border-hi:  rgba(90,205,255,.24);
-  --text-1:     #e8eef7;
-  --text-2:     #93a3bb;
-  --text-3:     #55637a;
-  --accent:     #38d9f5;
-  --accent-2:   #5684ff;
-  --accent-soft:   rgba(34,211,238,.12);
-  --accent-border: rgba(34,211,238,.38);
-  --green:      #34d399;
-  --yellow:     #fbbf24;
-  --red:        #fb7185;
-  --blue:       #38bdf8;
-  --shadow-sm:  0 1px 2px rgba(0,0,0,.4);
-  --shadow-md:  0 4px 16px rgba(0,0,0,.45);
-  --shadow-lg:  0 12px 40px rgba(0,0,0,.55);
-  --ring:       rgba(34,211,238,.45);
-  --badge-green:  rgba(52,211,153,.15);
-  --badge-yellow: rgba(251,191,36,.15);
-  --badge-red:    rgba(251,113,133,.15);
-  --badge-blue:   rgba(56,189,248,.15);
-  --badge-accent: rgba(34,211,238,.14);
-  --badge-gray:   rgba(85,99,122,.15);
-}
-
-/* ── 科技白（浅色） ─────────────────────────── */
 [data-theme="light"] {
-  --bg-base:    #f4f7fc;
+  color-scheme: light;
+  --bg-base: #fafbf8;
   --bg-surface: #ffffff;
-  --bg-raised:  #edf3fb;
-  --bg-overlay: #e3edf8;
-  --border:     rgba(25,68,120,.10);
-  --border-hi:  rgba(8,145,178,.25);
-  --text-1:     #101e33;
-  --text-2:     #4b5d77;
-  --text-3:     #7c8ba2;
-  --accent:     #087fbd;
-  --accent-2:   #6259dc;
-  --accent-soft:   rgba(8,145,178,.10);
-  --accent-border: rgba(8,145,178,.35);
-  --green:      #059669;
-  --yellow:     #b45309;
-  --red:        #e11d48;
-  --blue:       #0284c7;
-  --shadow-sm:  0 1px 2px rgba(15,50,90,.08);
-  --shadow-md:  0 4px 14px rgba(15,50,90,.12);
-  --shadow-lg:  0 12px 36px rgba(15,50,90,.18);
-  --ring:       rgba(8,145,178,.35);
-  --badge-green:  rgba(5,150,105,.12);
-  --badge-yellow: rgba(180,83,9,.12);
-  --badge-red:    rgba(225,29,72,.10);
-  --badge-blue:   rgba(2,132,199,.12);
-  --badge-accent: rgba(8,145,178,.12);
-  --badge-gray:   rgba(14,27,44,.07);
+  --bg-raised: #f1f4ee;
+  --bg-overlay: #ffffff;
+  --border: rgba(40,66,49,.10);
+  --border-hi: rgba(40,66,49,.17);
+  --text-1: #24332b;
+  --text-2: #5e7064;
+  --text-3: #718175;
+  --accent: #247c65;
+  --accent-2: #1b6552;
+  --on-accent: #ffffff;
+  --accent-soft: rgba(36,124,101,.055);
+  --accent-border: rgba(36,124,101,.25);
+  --green: #247c65;
+  --yellow: #a3742c;
+  --red: #bd5353;
+  --blue: #4f799c;
+  --shadow-sm: 0 2px 6px rgba(27,49,35,.035);
+  --shadow-md: 0 6px 24px rgba(27,49,35,.055);
+  --shadow-lg: 0 16px 50px rgba(27,49,35,.12);
+  --ring: rgba(36,124,101,.5);
+  --badge-green: rgba(36,124,101,.08);
+  --badge-yellow: rgba(163,116,44,.08);
+  --badge-red: rgba(189,83,83,.08);
+  --badge-blue: rgba(79,121,156,.08);
+  --badge-accent: rgba(36,124,101,.08);
+  --badge-gray: rgba(40,66,49,.05);
 }
 
 * { box-sizing: border-box; }
@@ -152,8 +124,7 @@
 .folder-picker-header > button:hover,.folder-picker-path > button:hover:not(:disabled) { color:var(--text-1); background:var(--bg-raised); }
 .folder-picker-path { display:flex; align-items:center; gap:7px; padding:10px 14px; border-bottom:1px solid var(--border); }
 .folder-picker-path > button:disabled { opacity:.35; cursor:default; }
-.folder-picker-path > input { min-width:0; flex:1; padding:6px 8px; border:1px solid var(--border); border-radius:6px; color:var(--text-2); background:var(--bg-base); font:10px var(--font-mono); outline:none; }
-.folder-picker-path > input:focus { border-color:var(--accent); }
+.folder-picker-path > span { min-width:0; flex:1; overflow:hidden; padding:6px 8px; color:var(--text-2); font:10px var(--font-mono); text-overflow:ellipsis; white-space:nowrap; }
 .folder-picker-go { padding:6px 8px; border:1px solid var(--border); border-radius:6px; color:var(--text-2); background:var(--bg-raised); font:inherit; font-size:10px; cursor:pointer; }
 .folder-picker-go:disabled { opacity:.4; cursor:default; }
 .folder-picker-list { min-height:180px; flex:1; overflow:auto; padding:7px; }
@@ -165,7 +136,7 @@
 .folder-picker-empty { min-height:166px; display:flex; align-items:center; justify-content:center; gap:8px; padding:20px; color:var(--text-3); text-align:center; font-size:12px; }
 .folder-picker-create { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:5px; padding:5px 5px 9px; border-bottom:1px solid var(--border); }
 .folder-picker-create input { min-width:0; padding:6px 8px; border:1px solid var(--border-hi); border-radius:6px; color:var(--text-1); background:var(--bg-base); font:inherit; font-size:11px; outline:none; }
-.folder-picker-create > button { padding:0 9px; border:0; border-radius:6px; color:#fff; background:var(--accent-2); font:inherit; font-size:11px; cursor:pointer; }
+.folder-picker-create > button { padding:0 9px; border:0; border-radius:6px; color:var(--on-accent); background:var(--accent); font:inherit; font-size:11px; cursor:pointer; }
 .folder-picker-create > button:disabled { opacity:.45; cursor:default; }
 .folder-picker-create > .folder-picker-create-cancel { border:1px solid var(--border); color:var(--text-2); background:transparent; }
 .folder-picker-create > span { grid-column:1/-1; overflow-wrap:anywhere; font-size:10px; }
@@ -178,9 +149,9 @@
 .folder-picker-new-folder { display:flex; align-items:center; gap:5px; margin-right:auto; border:1px solid var(--border); color:var(--text-2); background:transparent; }
 .folder-picker-new-folder:hover:not(:disabled) { color:var(--accent); border-color:var(--accent-border); }
 .folder-picker-new-folder:disabled { opacity:.45; cursor:default; }
-.folder-picker-confirm { border:1px solid transparent; color:#fff; background:linear-gradient(130deg,var(--accent),var(--accent-2)); }
+.folder-picker-confirm { border:1px solid transparent; color:var(--on-accent); background:var(--accent); }
 .folder-picker-confirm:disabled { opacity:.45; cursor:default; }
-[data-theme="light"] .app-sidebar { background:#f7f7f8; }
+[data-theme="light"] .app-sidebar { background:#f3f5f0; }
 [data-theme="light"] .folder-picker-backdrop { background:rgba(24,38,58,.22); }
 
 html, body, #root {

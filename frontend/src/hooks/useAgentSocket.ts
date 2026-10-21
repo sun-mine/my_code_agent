@@ -16,9 +16,12 @@ export function useAgentSocket({ onEvent, onStatusChange, onReconnect }: UseSock
   const onEventRef = useRef(onEvent)
   const onStatusRef = useRef(onStatusChange)
   const onReconnectRef = useRef(onReconnect)
-  onEventRef.current = onEvent
-  onStatusRef.current = onStatusChange
-  onReconnectRef.current = onReconnect
+
+  useEffect(() => {
+    onEventRef.current = onEvent
+    onStatusRef.current = onStatusChange
+    onReconnectRef.current = onReconnect
+  }, [onEvent, onStatusChange, onReconnect])
 
   useEffect(() => {
     const socketUrl = import.meta.env.DEV ? 'http://localhost:8000' : '/'
@@ -48,7 +51,11 @@ export function useAgentSocket({ onEvent, onStatusChange, onReconnect }: UseSock
     return () => { socket.disconnect() }
   }, [])
 
-  const sendMessage = useCallback((message: string | ContentBlock[], mode?: string) => {
+  const sendMessage = useCallback((
+    message: string | ContentBlock[],
+    mode?: string,
+    sessionId?: string,
+  ): boolean => {
     const socket = socketRef.current
     if (!socket || !socket.connected) {
       // 主动触发立即重连（不等下一次自动重试）
@@ -56,15 +63,17 @@ export function useAgentSocket({ onEvent, onStatusChange, onReconnect }: UseSock
       onEventRef.current({
         type: 'error',
         message: socket ? '连接已断开，正在重连…请稍候重试' : '尚未连接到服务器，请刷新页面',
+        session_id: sessionId,
         ts: Date.now() / 1000,
       } as AgentEvent)
-      return
+      return false
     }
-    socket.emit('send_message', { message, mode })
+    socket.emit('send_message', { message, mode, session_id: sessionId })
+    return true
   }, [])
 
-  const sendInterrupt = useCallback(() => {
-    socketRef.current?.emit('interrupt')
+  const sendInterrupt = useCallback((sessionId?: string) => {
+    socketRef.current?.emit('interrupt', { session_id: sessionId })
   }, [])
 
   return { sendMessage, sendInterrupt }

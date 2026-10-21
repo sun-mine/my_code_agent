@@ -1,11 +1,11 @@
-import type { ApiResponse, AgentStatus, Task, TodoItem, TeamMember, Checkpoint, FileNode, FileDiff } from './types'
+import type { ApiResponse, AgentStatus, Task, TodoItem, TeamMember, Checkpoint, FileNode, FileDiff, SessionInfo, SessionSnapshot } from './types'
 
 const BASE = '/api'
 
 async function get<T>(path: string, params?: Record<string, string>): Promise<T> {
-  const url = new URL(BASE + path, location.origin)
-  if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v))
-  const r = await fetch(url.toString())
+  const query = params ? new URLSearchParams(params).toString() : ''
+  const url = `${BASE}${path}${query ? `?${query}` : ''}`
+  const r = await fetch(url)
   const json: ApiResponse<T> = await r.json()
   if (!json.success) throw new Error(json.error || 'API error')
   return json.data as T
@@ -60,15 +60,15 @@ export const api = {
   status: () => get<AgentStatus>('/status'),
 
   // ── Chat ────────────────────────────────────────
-  chat: (message: string | import('./types').ContentBlock[]) =>
-    post<{ run_id: string; status: string }>('/chat', { message }),
+  chat: (message: string | import('./types').ContentBlock[], sessionId?: string) =>
+    post<{ run_id: string; status: string; session_id: string }>('/chat', { message, session_id: sessionId }),
 
-  interrupt: () => post<unknown>('/chat/interrupt'),
-  toolApprove: (tool_use_id: string, approved: boolean) =>
-    post<unknown>('/chat/tool_approve', { tool_use_id, approved }),
+  interrupt: (sessionId?: string, runId?: string) => post<unknown>('/chat/interrupt', { session_id: sessionId, run_id: runId }),
+  toolApprove: (tool_use_id: string, approved: boolean, sessionId?: string, runId?: string) =>
+    post<unknown>('/chat/tool_approve', { tool_use_id, approved, session_id: sessionId, run_id: runId }),
 
-  history: () => get<{ history: Array<{ role: string; content: unknown }>; total: number }>('/history'),
-  clearHistory: () => del<unknown>('/history'),
+  history: (sessionId?: string) => get<SessionSnapshot>('/history', sessionId ? { session_id: sessionId } : undefined),
+  clearHistory: (sessionId?: string) => del<unknown>(`/history${sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ''}`),
 
   // ── Tasks ────────────────────────────────────────
   tasks: () => get<{ tasks: Task[] }>('/tasks'),
@@ -99,7 +99,7 @@ export const api = {
   // ── Workdir ────────────────────────────────────
   getWorkdir: () => get<{ workdir: string }>('/workdir'),
   setWorkdir: (workdir: string) =>
-    post<{ workdir: string; message: string }>('/workdir', { workdir }),
+    post<{ workdir: string; message: string; session_id?: string }>('/workdir', { workdir }),
 
   // ── Files ─────────────────────────────────────
   fileTree: (depth = 3, path?: string) =>
@@ -122,19 +122,20 @@ export const api = {
   // ── Plan ───────────────────────────────────
   savePlan: (content: string, title?: string) =>
     post<{ filename: string; path: string }>('/plan/save', { content, title }),
-  executePlan: (planContent: string, todos: Array<{ content: string; status: string; activeForm: string }>) =>
-    post<{ run_id: string; status: string }>('/plan/execute', { plan_content: planContent, todos }),
+  executePlan: (planContent: string, todos: Array<{ content: string; status: string; activeForm: string }>, sessionId?: string) =>
+    post<{ run_id: string; status: string; session_id: string }>('/plan/execute', { plan_content: planContent, todos, session_id: sessionId }),
 
   // ── Diff ──────────────────────────────────────
   fileDiff: (path: string) =>
     post<FileDiff>('/files/diff', { path }),
 
   // ── Sessions ───────────────────────────────────
-  sessions: (workdir?: string) => get<{ sessions: Array<{ id: string; title: string; created_at: number; updated_at: number; message_count: number; workdir: string }> }>('/sessions', workdir ? { workdir } : undefined),
+  sessions: (workdir?: string) => get<{ sessions: SessionInfo[] }>('/sessions', workdir ? { workdir } : undefined),
+  newSession: (workdir?: string) => post<SessionSnapshot>('/sessions/new', { workdir }),
   createSession: (id: string, title: string, messageCount: number) =>
     post<{ id: string; title: string }>('/sessions', { id, title, message_count: messageCount }),
   getSession: (sid: string) => get<{ id: string; title: string; history: Array<{ role: string; content: unknown }> }>(`/sessions/${sid}`),
-  loadSession: (sid: string) => post<{ history: Array<{ role: string; content: unknown }>; title: string; workdir: string }>(`/sessions/${sid}/load`),
+  loadSession: (sid: string) => post<SessionSnapshot>(`/sessions/${encodeURIComponent(sid)}/load`),
   deleteSession: (sid: string, workdir?: string) => del<{ deleted: string }>(`/sessions/${sid}${workdir ? `?workdir=${encodeURIComponent(workdir)}` : ''}`),
   recentErrors: (limit = 20) =>
     get<unknown[]>('/errors/recent', { limit: String(limit) }),

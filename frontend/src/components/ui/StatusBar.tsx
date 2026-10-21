@@ -23,7 +23,7 @@ export function StatusBar({ socketStatus, agentState, workdir, workdirError, mod
     socketStatus === 'connecting' ? '连接中' : '断开连接'
 
   return (
-    <div className="flex items-center gap-3 px-4 py-1.5 border-t border-[var(--border)] bg-[var(--bg-surface)] text-[10px] text-[var(--text-3)] select-none overflow-hidden">
+    <div className="workbench-status flex items-center gap-3 px-4 py-1.5 border-t border-[var(--border)] bg-[var(--bg-surface)] text-[10px] text-[var(--text-3)] select-none overflow-hidden">
       {/* 连接状态 */}
       <span className="flex items-center gap-1.5">
         <span style={{ background: connColor }} className="w-1.5 h-1.5 rounded-full flex-shrink-0" />
@@ -42,7 +42,7 @@ export function StatusBar({ socketStatus, agentState, workdir, workdirError, mod
         <>
           <span className="text-[var(--border-hi)]">·</span>
           <span
-            className="truncate max-w-[200px] flex items-center gap-1"
+            className="status-detail truncate max-w-[200px] flex items-center gap-1"
             title={workdir}
             style={{ color: workdirError ? 'var(--red)' : undefined }}
           >
@@ -66,7 +66,7 @@ export function StatusBar({ socketStatus, agentState, workdir, workdirError, mod
       {model && (
         <>
           <span className="text-[var(--border-hi)]">·</span>
-          <span>{model}</span>
+          <span className="status-detail">{model}</span>
         </>
       )}
 

@@ -44,6 +44,20 @@ export interface SessionInfo {
   updated_at: number
   message_count: number
   workdir: string
+  running?: boolean
+}
+
+export interface SessionSnapshot {
+  session_id: string
+  history: Array<{ role: string; content: unknown }>
+  total?: number
+  title?: string
+  workdir: string
+  mode?: AgentMode
+  running: boolean
+  run_id: string | null
+  events: AgentEvent[]
+  event_seq: number
 }
 
 // ── 图片附件（本地状态）─────────────────────────
@@ -103,6 +117,8 @@ export type AgentEventType =
 
 export interface AgentEvent {
   type: AgentEventType
+  session_id?: string
+  event_seq?: number
   run_id?: string
   ts: number
   text?: string
@@ -216,6 +232,9 @@ export interface ApiResponse<T> {
 
 // ── 状态 ──────────────────────────────────────────
 export interface AgentStatus {
+  session_id?: string
+  running_session_id?: string | null
+  running_run_id?: string | null
   agent_state: 'idle' | 'thinking' | 'executing_tool'
   run_id: string | null
   workdir: string

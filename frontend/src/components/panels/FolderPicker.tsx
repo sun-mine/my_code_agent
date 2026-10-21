@@ -11,7 +11,6 @@ interface FolderPickerProps {
 
 export function FolderPicker({ initialPath, onSelect, onClose }: FolderPickerProps) {
   const [path, setPath] = useState(initialPath || '')
-  const [pathDraft, setPathDraft] = useState(initialPath || '')
   const [selecting, setSelecting] = useState(false)
   const [selectError, setSelectError] = useState('')
   const [newItemType, setNewItemType] = useState<'folder' | 'file' | null>(null)
@@ -64,9 +63,8 @@ export function FolderPicker({ initialPath, onSelect, onClose }: FolderPickerPro
           <button onClick={onClose} aria-label="关闭"><X size={17} /></button>
         </header>
         <div className="folder-picker-path">
-          <button onClick={() => { if (data?.parent) { setPath(data.parent); setPathDraft(data.parent) } }} disabled={!data?.parent || isLoading} title="上一级"><ChevronLeft size={15} /></button>
-          <input aria-label="文件夹路径" value={pathDraft} onChange={event => setPathDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') setPath(pathDraft.trim()) }} placeholder={currentPath || '输入文件夹完整路径'} />
-          <button className="folder-picker-go" onClick={() => setPath(pathDraft.trim())} disabled={!pathDraft.trim() || isLoading}>转到</button>
+          <button onClick={() => { if (data?.parent) setPath(data.parent) }} disabled={!data?.parent || isLoading} title="上一级"><ChevronLeft size={15} /></button>
+          <span title={currentPath}>{currentPath || '正在读取当前目录…'}</span>
         </div>
         <div className="folder-picker-list">
           {newItemType && (
@@ -81,7 +79,7 @@ export function FolderPicker({ initialPath, onSelect, onClose }: FolderPickerPro
             : error ? <div className="folder-picker-empty">{error}</div>
               : (data?.items ?? []).length === 0 ? <div className="folder-picker-empty">此目录下没有子文件夹</div>
                 : (data?.items ?? []).map(folder => (
-                  <button key={folder.path} className="folder-picker-item" onClick={() => { setPath(folder.path); setPathDraft(folder.path) }}>
+                  <button key={folder.path} className="folder-picker-item" onClick={() => setPath(folder.path)}>
                     <Folder size={15} /><span>{folder.name}</span><ChevronRight size={13} />
                   </button>
                 ))}

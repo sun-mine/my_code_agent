@@ -51,14 +51,22 @@ echo "  后端 PID: $BACKEND_PID"
 
 # 等待后端就绪
 echo -n "  等待后端就绪 "
-for i in $(seq 1 15); do
+BACKEND_READY=false
+for i in $(seq 1 30); do
   sleep 1
   echo -n "."
   if curl -sf http://localhost:8000/api/status >/dev/null 2>&1; then
     echo -e " ${GREEN}OK${NC}"
+    BACKEND_READY=true
     break
   fi
 done
+
+if [ "$BACKEND_READY" != true ]; then
+  echo -e "\n${RED}❌ 后端在 30 秒内未就绪，未启动前端。请检查上方 Python 错误信息。${NC}"
+  kill "$BACKEND_PID" 2>/dev/null || true
+  exit 1
+fi
 
 # ── 前端 ──────────────────────────────────────────
 echo -e "${GREEN}▶ 启动前端 (http://localhost:5173)${NC}"

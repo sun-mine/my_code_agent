@@ -1,17 +1,18 @@
 import { useState, useRef, useCallback, useEffect, type KeyboardEvent, type ClipboardEvent } from 'react'
-import { Image, Paperclip, ChevronDown, ArrowUp, Square, X, Check, Eye, EyeOff } from 'lucide-react'
-import { Spinner } from '../ui/Button'
+import { Image, Paperclip, Plus, ChevronDown, ArrowUp, Square, X, Check, Eye, EyeOff } from 'lucide-react'
 import { api } from '../../lib/api'
-import { ICON_SM } from '../../lib/icons'
-import type { AgentMode, FileContext, ImageAttachment, ModelInfo, SlashCommand, ContentBlock } from '../../lib/types'
+import type { AgentMode, FileContext, ImageAttachment, ModelInfo, SlashCommand } from '../../lib/types'
+import './ChatInput.css'
 
 interface ChatInputProps {
+  sessionId?: string
   onSend: (text: string, attachments: { images: ImageAttachment[]; fileContexts: FileContext[] }) => void
   onInterrupt: () => void
   onClearHistory?: () => void
   onCompress?: () => void
   busy: boolean
   disabled?: boolean
+  sendDisabled?: boolean
   mode: AgentMode
   onModeChange: (mode: AgentMode) => void
   currentModel: string
@@ -42,20 +43,27 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { trigger: '/compress', label: '压缩对话', description: '压缩对话以节省 Token' },
 ]
 
+const sessionDrafts = new Map<string, { draft: string; images: ImageAttachment[] }>()
+
 export function ChatInput({
-  onSend, onInterrupt, onClearHistory, onCompress, busy, disabled,
+  sessionId, onSend, onInterrupt, onClearHistory, onCompress, busy, disabled, sendDisabled,
   mode, onModeChange, currentModel, onModelChange, availableModels,
   fileContexts, onFileContextToggle, onFileContextAdd, onFileContextRemove,
   preFill, onPreFillConsumed, workdir,
 }: ChatInputProps) {
-  const [draft, setDraft] = useState('')
-  const [images, setImages] = useState<ImageAttachment[]>([])
+  const [draft, setDraft] = useState(() => sessionId ? sessionDrafts.get(sessionId)?.draft ?? '' : '')
+  const [images, setImages] = useState<ImageAttachment[]>(() => sessionId ? sessionDrafts.get(sessionId)?.images ?? [] : [])
   const [plusOpen, setPlusOpen] = useState(false)
   const [modelOpen, setModelOpen] = useState(false)
   const [modeOpen, setModeOpen] = useState(false)
   const [focused, setFocused] = useState(false)
   const [slashState, setSlashState] = useState<{ query: string; selIdx: number } | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const composingRef = useRef(false)
+
+  useEffect(() => {
+    if (sessionId) sessionDrafts.set(sessionId, { draft, images })
+  }, [sessionId, draft, images])
 
   useEffect(() => {
     if (preFill) {
@@ -67,14 +75,16 @@ export function ChatInput({
 
   const send = useCallback(() => {
     const text = draft.trim()
-    if ((!text && images.length === 0) || busy) return
+    if ((!text && images.length === 0) || busy || disabled || sendDisabled || composingRef.current) return
     onSend(text, { images, fileContexts: fileContexts.filter(fc => fc.included) })
     setDraft('')
     setImages([])
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
-  }, [draft, images, fileContexts, busy, onSend])
+  }, [draft, images, fileContexts, busy, disabled, sendDisabled, onSend])
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.nativeEvent.isComposing || composingRef.current) return
+
     if (slashState) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
@@ -248,370 +258,111 @@ export function ChatInput({
   const modelLabel = availableModels.find(m => m.id === currentModel)?.label || currentModel || '选择模型'
 
   return (
-    <div style={{ padding: '8px 12px 12px', background: 'var(--bg-surface)', borderTop: '1px solid var(--border)', position: 'relative' }}>
-      {/* ── File context chips ────────────────── */}
+    <div className="chat-composer">
       {fileContexts.length > 0 && (
-        <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
           {fileContexts.map(fc => (
-            <span
-              key={fc.path}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 4,
-                padding: '2px 8px', borderRadius: 999,
-                background: fc.included ? 'var(--badge-accent)' : 'var(--bg-raised)',
-                border: `1px solid ${fc.included ? 'var(--accent)' : 'var(--border)'}`,
-                color: fc.included ? 'var(--accent)' : 'var(--text-3)',
-                fontSize: 11, fontFamily: 'var(--font-mono)',
-              }}
-            >
-              {fc.included
-                ? <Eye size={10} />
-                : <EyeOff size={10} />
-              }
-              <button
-                onClick={() => onFileContextToggle(fc.path, !fc.included)}
-                title={fc.included ? '排除此文件' : '包含此文件'}
-                style={{
-                  background: 'none', border: 'none', cursor: 'pointer',
-                  color: 'inherit', padding: 0, fontSize: 11,
-                  fontFamily: 'var(--font-mono)',
-                }}
-              >
-                {fc.path}
-              </button>
-              {onFileContextRemove && (
-                <button
-                  onClick={() => onFileContextRemove(fc.path)}
-                  style={{
-                    background: 'none', border: 'none', cursor: 'pointer',
-                    color: 'var(--text-3)', padding: 0, display: 'flex',
-                  }}
-                >
-                  <X size={10} />
-                </button>
-              )}
+            <span key={fc.path} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, maxWidth: '100%', padding: '4px 9px', borderRadius: 8, background: fc.included ? 'var(--badge-accent)' : 'var(--bg-raised)', border: '1px solid var(--border)', color: fc.included ? 'var(--accent)' : 'var(--text-3)', fontSize: 11 }}>
+              {fc.included ? <Eye size={12} /> : <EyeOff size={12} />}
+              <button onClick={() => onFileContextToggle(fc.path, !fc.included)} title={fc.included ? '排除此文件' : '包含此文件'} style={{ border: 0, background: 'transparent', color: 'inherit', cursor: 'pointer', font: 'inherit', padding: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fc.path}</button>
+              {onFileContextRemove && <button className="icon-button" style={{ width: 18, height: 18 }} aria-label={`移除文件 ${fc.path}`} onClick={() => onFileContextRemove(fc.path)}><X size={12} /></button>}
             </span>
           ))}
         </div>
       )}
-
-      {/* ── Main input box ────────────────────── */}
-      <div
-        onFocusCapture={() => setFocused(true)}
-        onBlurCapture={() => setFocused(false)}
-        style={{
-          display: 'flex', flexDirection: 'column',
-          background: 'var(--bg-raised)',
-          border: `1px solid ${focused ? 'var(--accent-border)' : 'var(--border-hi)'}`,
-          borderRadius: 14, padding: '10px 10px 6px 8px',
-          boxShadow: focused
-            ? '0 0 0 3px var(--accent-soft), var(--shadow-md)'
-            : 'var(--shadow-md)',
-          transition: 'border-color 0.18s, box-shadow 0.18s',
-        }}
-      >
-        {/* Image strip */}
+      <div className={`composer-card${focused ? ' is-focused' : ''}`} onFocusCapture={() => setFocused(true)} onBlurCapture={() => setFocused(false)}>
         {images.length > 0 && (
-          <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap', padding: '0 4px' }}>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
             {images.map(img => (
               <div key={img.id} style={{ position: 'relative', width: 56, height: 56, flexShrink: 0 }}>
-                <img
-                  src={img.dataUrl}
-                  alt={img.fileName || 'image'}
-                  style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 6, border: '1px solid var(--border)' }}
-                />
-                <button
-                  onClick={() => removeImage(img.id)}
-                  style={{
-                    position: 'absolute', top: -4, right: -4,
-                    width: 18, height: 18, borderRadius: '50%',
-                    background: 'var(--bg-overlay)', border: '1px solid var(--border-hi)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    color: 'var(--text-2)', cursor: 'pointer', padding: 0, fontSize: 10,
-                  }}
-                >
-                  <X size={10} />
-                </button>
+                <img src={img.dataUrl} alt={img.fileName || '附加图片'} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8, border: '1px solid var(--border)' }} />
+                <button className="icon-button" aria-label={`移除图片 ${img.fileName || ''}`} onClick={() => removeImage(img.id)} style={{ position: 'absolute', top: -5, right: -5, width: 20, height: 20, borderRadius: '50%', background: 'var(--bg-overlay)', border: '1px solid var(--border-hi)' }}><X size={11} /></button>
               </div>
             ))}
           </div>
         )}
-
-        {/* Textarea + mode selector + send button row */}
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6 }}>
-          <textarea
-            ref={textareaRef}
-            value={draft}
-            onChange={e => setDraft(e.target.value)}
-            onKeyDown={onKeyDown}
-            onInput={onInput}
-            onPaste={handleImagePaste}
-            rows={1}
-            disabled={disabled}
-            placeholder={busy ? '智能体运行中…' : '输入消息，Enter 发送，Shift+Enter 换行…'}
-            style={{
-              flex: 1, resize: 'none', background: 'transparent',
-              fontSize: 13, color: 'var(--text-1)', outline: 'none',
-              border: 'none', minHeight: 24, maxHeight: 160,
-              padding: '2px 0', fontFamily: 'inherit', lineHeight: 1.5,
-            }}
-          />
-
-          {/* Mode selector + Send */}
-          <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
-            {/* Mode selector - single button with dropdown */}
-            <div style={{ position: 'relative' }}>
-              <button
-                onClick={() => setModeOpen(o => !o)}
-                title={MODES.find(m => m.mode === mode)?.desc}
-                style={{
-                  height: 30, display: 'flex', alignItems: 'center', gap: 4,
-                  padding: '0 8px', borderRadius: 7, fontSize: 11, fontWeight: 600,
-                  background: modeOpen ? 'var(--bg-overlay)' : 'var(--bg-raised)',
-                  border: `1px solid ${modeOpen ? 'var(--border-hi)' : 'var(--border)'}`,
-                  color: 'var(--text-2)', cursor: 'pointer',
-                  transition: 'all 0.15s',
-                }}
-              >
-                {MODES.find(m => m.mode === mode)?.label || mode}
-                <ChevronDown size={10} />
+        <textarea
+          className="composer-textarea"
+          aria-label="输入消息"
+          ref={textareaRef}
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onKeyDown={onKeyDown}
+          onInput={onInput}
+          onPaste={handleImagePaste}
+          onCompositionStart={() => { composingRef.current = true }}
+          onCompositionEnd={() => { composingRef.current = false }}
+          rows={2}
+          disabled={disabled}
+          placeholder={busy ? '智能体正在处理中…' : disabled ? '连接本地服务后，即可开始对话…' : '描述你的想法，或输入 / 查看指令…'}
+        />
+        <div className="composer-toolbar">
+          <div className="composer-control">
+            <button className="composer-tool-button" onClick={() => setPlusOpen(open => !open)} title="添加内容" aria-label="添加内容" aria-expanded={plusOpen}><Plus size={18} /></button>
+            {plusOpen && <>
+              <div style={{ position: 'fixed', inset: 0, zIndex: 100 }} onClick={() => setPlusOpen(false)} />
+              <div className="composer-menu composer-plus-menu">
+                <button className="composer-menu-item" onClick={handleImageUpload}><Image size={16} />添加图片</button>
+                <button className="composer-menu-item" onClick={handleFileUpload}><Paperclip size={16} />添加文件</button>
+              </div>
+            </>}
+          </div>
+          <div className="composer-control">
+            <button className="composer-model-button" onClick={() => setModelOpen(open => !open)} title="切换模型" aria-label="切换模型" aria-expanded={modelOpen}>
+              <span>{modelLabel.replace('claude-', '').replace('deepseek-v4-', 'V4 ').replace('deepseek-', '')}</span><ChevronDown size={11} />
+            </button>
+            {modelOpen && <>
+              <div style={{ position: 'fixed', inset: 0, zIndex: 100 }} onClick={() => setModelOpen(false)} />
+              <div className="composer-menu composer-model-menu">
+                <p className="composer-menu-title">选择模型</p>
+                {availableModels.length === 0 && <p className="composer-menu-title">连接本地服务后查看可用模型</p>}
+                {availableModels.map(m => (
+                  <button className={`composer-menu-item${currentModel === m.id ? ' is-selected' : ''}`} key={m.id} onClick={() => handleModelSelect(m.id)}>
+                    {currentModel === m.id ? <Check size={12} color="var(--accent)" /> : <span className="composer-option-check" />}
+                    <span>{m.label}</span><span className="composer-provider">{m.provider}</span>
+                  </button>
+                ))}
+              </div>
+            </>}
+          </div>
+          <div className="composer-actions">
+            <div className="composer-control">
+              <button className="composer-mode-button" onClick={() => setModeOpen(open => !open)} title={MODES.find(m => m.mode === mode)?.desc} aria-label="选择执行模式" aria-expanded={modeOpen}>
+                {MODES.find(m => m.mode === mode)?.label || mode}<ChevronDown size={11} />
               </button>
-              {modeOpen && (
-                <>
-                  <div style={{ position: 'fixed', inset: 0, zIndex: 100 }} onClick={() => setModeOpen(false)} />
-                  <div style={{
-                    position: 'absolute', bottom: 'calc(100% + 6px)', right: 0, zIndex: 101,
-                    background: 'var(--bg-overlay)', border: '1px solid var(--border-hi)',
-                    borderRadius: 8, padding: '4px 0', minWidth: 240,
-                    boxShadow: 'var(--shadow-lg)',
-                  }}>
-                    <p style={{ fontSize: 10, color: 'var(--text-3)', padding: '4px 12px 6px', margin: 0, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                      选择模式
-                    </p>
-                    {MODES.map(m => (
-                      <button
-                        key={m.mode}
-                        onClick={() => { onModeChange(m.mode); setModeOpen(false) }}
-                        style={{
-                          display: 'flex', alignItems: 'center', gap: 8,
-                          width: '100%', padding: '6px 12px',
-                          background: mode === m.mode ? 'var(--bg-raised)' : 'none',
-                          border: 'none', cursor: 'pointer',
-                          color: mode === m.mode ? 'var(--text-1)' : 'var(--text-2)',
-                          fontSize: 12, textAlign: 'left',
-                        }}
-                        onMouseOver={e => { if (mode !== m.mode) e.currentTarget.style.background = 'var(--bg-raised)' }}
-                        onMouseOut={e => { if (mode !== m.mode) e.currentTarget.style.background = 'none' }}
-                      >
-                        {mode === m.mode && <Check size={12} color="var(--accent)" />}
-                        {mode !== m.mode && <span style={{ width: 12 }} />}
-                        <span style={{ fontWeight: 600 }}>{m.label}</span>
-                        <span style={{ fontSize: 10, color: 'var(--text-3)' }}>{m.desc}</span>
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
+              {modeOpen && <>
+                <div style={{ position: 'fixed', inset: 0, zIndex: 100 }} onClick={() => setModeOpen(false)} />
+                <div className="composer-menu composer-mode-menu">
+                  <p className="composer-menu-title">执行模式</p>
+                  {MODES.map(m => (
+                    <button className={`composer-menu-item${mode === m.mode ? ' is-selected' : ''}`} key={m.mode} onClick={() => { onModeChange(m.mode); setModeOpen(false) }}>
+                      {mode === m.mode ? <Check size={12} color="var(--accent)" /> : <span className="composer-option-check" />}
+                      <span className="composer-option-copy"><strong>{m.label}</strong><small>{m.desc}</small></span>
+                    </button>
+                  ))}
+                </div>
+              </>}
             </div>
-
-            {busy ? (
-              <button
-                onClick={onInterrupt}
-                title="停止生成"
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 5,
-                  padding: '4px 10px', borderRadius: 6, fontSize: 11,
-                  background: 'var(--bg-overlay)', color: 'var(--text-2)',
-                  border: '1px solid var(--border)', cursor: 'pointer',
-                  transition: 'all 0.15s',
-                }}
-              >
-                <Square size={9} fill="currentColor" />
-                停止
-              </button>
-            ) : (
-              <button
-                onClick={send}
-                disabled={(!draft.trim() && images.length === 0) || disabled}
-                title="发送 (Enter)"
-                style={{
-                  width: 30, height: 30, borderRadius: 8,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: (draft.trim() || images.length > 0) && !disabled ? 'var(--accent)' : 'var(--bg-overlay)',
-                  border: 'none',
-                  color: (draft.trim() || images.length > 0) && !disabled ? '#fff' : 'var(--text-3)',
-                  cursor: (draft.trim() || images.length > 0) && !disabled ? 'pointer' : 'not-allowed',
-                  boxShadow: (draft.trim() || images.length > 0) && !disabled ? 'var(--shadow-sm)' : 'none',
-                  transition: 'all 0.15s',
-                }}
-                onMouseOver={e => { if ((draft.trim() || images.length > 0) && !disabled) e.currentTarget.style.background = 'var(--accent-2)' }}
-                onMouseOut={e => { if ((draft.trim() || images.length > 0) && !disabled) e.currentTarget.style.background = 'var(--accent)' }}
-              >
-                <ArrowUp size={14} strokeWidth={2.5} />
-              </button>
-            )}
+            {busy
+              ? <button className="composer-stop" onClick={onInterrupt} title="停止生成"><Square size={10} fill="currentColor" />停止</button>
+              : <button className="composer-send" onClick={send} disabled={(!draft.trim() && images.length === 0) || disabled || sendDisabled} title="发送 (Enter)" aria-label="发送消息"><ArrowUp size={18} strokeWidth={2} /></button>}
           </div>
-        </div>
-
-        {/* Bottom toolbar */}
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 4,
-          marginTop: 2, padding: '0 4px',
-        }}>
-          {/* + button */}
-          <div style={{ position: 'relative' }}>
-            <button
-              onClick={() => setPlusOpen(o => !o)}
-              title="添加内容"
-              style={{
-                width: 26, height: 26, borderRadius: 5, flexShrink: 0,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: plusOpen ? 'var(--bg-overlay)' : 'none',
-                border: '1px solid ' + (plusOpen ? 'var(--border-hi)' : 'transparent'),
-                color: plusOpen ? 'var(--text-1)' : 'var(--text-3)',
-                cursor: 'pointer', fontSize: 14, fontWeight: 700,
-                transition: 'all 0.15s',
-              }}
-            >
-              +
-            </button>
-            {/* + Menu popover */}
-            {plusOpen && (
-              <>
-                <div style={{ position: 'fixed', inset: 0, zIndex: 100 }} onClick={() => setPlusOpen(false)} />
-                <div style={{
-                  position: 'absolute', bottom: '100%', left: 0, zIndex: 101,
-                  background: 'var(--bg-overlay)', border: '1px solid var(--border-hi)',
-                  borderRadius: 8, padding: '4px 0', minWidth: 160,
-                  boxShadow: 'var(--shadow-lg)',
-                  marginBottom: 6,
-                }}>
-                  {[
-                    { icon: Image, label: '图片', action: 'image' },
-                    { icon: Paperclip, label: '添加文件', action: 'file' },
-                  ].map(item => (
-                    <button
-                      key={item.action}
-                      onClick={() => item.action === 'image' ? handleImageUpload() : handleFileUpload()}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 8,
-                        width: '100%', padding: '6px 12px',
-                        background: 'none', border: 'none', cursor: 'pointer',
-                        color: 'var(--text-1)', fontSize: 12, textAlign: 'left',
-                      }}
-                      onMouseOver={e => { e.currentTarget.style.background = 'var(--bg-raised)' }}
-                      onMouseOut={e => { e.currentTarget.style.background = 'none' }}
-                    >
-                      <item.icon size={ICON_SM + 2} />
-                      {item.label}
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-
-          {/* Model selector */}
-          <div style={{ position: 'relative' }}>
-            <button
-              onClick={() => setModelOpen(o => !o)}
-              title="切换模型"
-              style={{
-                display: 'flex', alignItems: 'center', gap: 4,
-                padding: '2px 8px', borderRadius: 5, fontSize: 11,
-                background: modelOpen ? 'var(--bg-overlay)' : 'none',
-                border: '1px solid ' + (modelOpen ? 'var(--border-hi)' : 'transparent'),
-                color: 'var(--text-3)', cursor: 'pointer',
-                fontFamily: 'var(--font-mono)',
-                transition: 'all 0.15s',
-              }}
-            >
-              {modelLabel.replace('claude-', '').replace('deepseek-v4-', 'V4 ').replace('deepseek-', '')}
-              <ChevronDown size={10} />
-            </button>
-            {/* Model picker popover */}
-            {modelOpen && (
-              <>
-                <div style={{ position: 'fixed', inset: 0, zIndex: 100 }} onClick={() => setModelOpen(false)} />
-                <div style={{
-                  position: 'absolute', bottom: '100%', left: 0, zIndex: 101,
-                  background: 'var(--bg-overlay)', border: '1px solid var(--border-hi)',
-                  borderRadius: 8, padding: '4px 0', minWidth: 200,
-                  boxShadow: 'var(--shadow-lg)',
-                  marginBottom: 6,
-                }}>
-                  <p style={{ fontSize: 10, color: 'var(--text-3)', padding: '4px 12px 6px', margin: 0, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    选择模型
-                  </p>
-                  {availableModels.map(m => (
-                    <button
-                      key={m.id}
-                      onClick={() => handleModelSelect(m.id)}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 8,
-                        width: '100%', padding: '6px 12px',
-                        background: currentModel === m.id ? 'var(--bg-raised)' : 'none',
-                        border: 'none', cursor: 'pointer',
-                        color: currentModel === m.id ? 'var(--text-1)' : 'var(--text-2)',
-                        fontSize: 12, textAlign: 'left',
-                      }}
-                      onMouseOver={e => { if (currentModel !== m.id) e.currentTarget.style.background = 'var(--bg-raised)' }}
-                      onMouseOut={e => { if (currentModel !== m.id) e.currentTarget.style.background = 'none' }}
-                    >
-                      {currentModel === m.id && <Check size={12} color="var(--accent)" />}
-                      {currentModel !== m.id && <span style={{ width: 12 }} />}
-                      <span>{m.label}</span>
-                      <span style={{ fontSize: 10, color: 'var(--text-3)', marginLeft: 'auto' }}>{m.provider}</span>
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-
-          <div style={{ flex: 1 }} />
         </div>
       </div>
-
-      {/* ── Slash command popover ──────────────── */}
-      {slashState && matchedCommands.length > 0 && (
-        <>
-          <div style={{ position: 'fixed', inset: 0, zIndex: 100 }} onClick={() => setSlashState(null)} />
-          <div style={{
-            position: 'absolute', bottom: 'calc(100% + 4px)', left: 18, zIndex: 101,
-            background: 'var(--bg-overlay)', border: '1px solid var(--border-hi)',
-            borderRadius: 8, padding: '4px 0', minWidth: 220,
-            boxShadow: 'var(--shadow-lg)',
-          }}>
-            {matchedCommands.map((cmd, i) => (
-              <button
-                key={cmd.trigger}
-                onClick={() => handleSlashSelect(cmd)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  width: '100%', padding: '6px 12px',
-                  background: i === slashState.selIdx ? 'var(--bg-raised)' : 'none',
-                  border: 'none', cursor: 'pointer',
-                  color: 'var(--text-1)', fontSize: 12, textAlign: 'left',
-                }}
-              >
-                <span style={{
-                  fontFamily: 'var(--font-mono)', fontWeight: 600,
-                  color: 'var(--accent)', minWidth: 70, fontSize: 11,
-                }}>
-                  {cmd.trigger}
-                </span>
-                <span style={{ color: 'var(--text-2)' }}>{cmd.label}</span>
-                <span style={{ color: 'var(--text-3)', fontSize: 11, marginLeft: 'auto' }}>{cmd.description}</span>
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-
-      <p style={{ textAlign: 'center', fontSize: 10, color: 'var(--text-3)', margin: '5px 0 0' }}>
-        Shift+Enter 换行 · Enter 发送 · / 调用命令 · Ctrl+V 粘贴图片
-      </p>
+      {slashState && matchedCommands.length > 0 && <>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 100 }} onClick={() => setSlashState(null)} />
+        <div className="composer-menu composer-slash-menu">
+          {matchedCommands.map((cmd, i) => (
+            <button className={`composer-menu-item${i === slashState.selIdx ? ' is-selected' : ''}`} key={cmd.trigger} onClick={() => handleSlashSelect(cmd)}>
+              <span className="composer-slash-command">{cmd.trigger}</span><span>{cmd.label}</span><span className="composer-slash-description">{cmd.description}</span>
+            </button>
+          ))}
+        </div>
+      </>}
+      <div className="composer-footer">
+        <span className={`composer-connection${disabled ? ' is-offline' : ''}`}><i />{disabled ? '等待本地服务连接' : busy ? '正在处理你的任务' : '准备就绪，随时开始'}</span>
+        <span className="composer-keyboard-hint">Enter 发送 <span aria-hidden="true">·</span> Shift + Enter 换行</span>
+      </div>
     </div>
   )
 }

@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Trash2, Circle, AlertCircle, Plus, Minus, Pencil, Bot, FolderOpen, ChevronRight, ChevronUp } from 'lucide-react'
+import { Trash2, Circle, AlertCircle, Plus, Minus, Pencil, Terminal, FolderOpen, ChevronRight, ChevronUp, Layers3, Code2, Search, ArrowUpRight, PanelLeft, X } from 'lucide-react'
+import './App.css'
 
 import { useAgentSocket, type SocketStatus } from './hooks/useAgentSocket'
-import { useChat, type FileChange, type ToolCall } from './hooks/useChat'
+import { useChat, type FileChange } from './hooks/useChat'
 import { api } from './lib/api'
+import { historyToMessages } from './lib/history'
 import { applyTheme } from './lib/theme'
-import type { AgentMode, FileContext, ModelInfo, ContentBlock, ImageAttachment, ChatMessage, AssistantStep } from './lib/types'
+import type { AgentMode, FileContext, ModelInfo, ContentBlock, ImageAttachment, ChatMessage, AgentEvent, SessionSnapshot } from './lib/types'
 
 import { MessageBubble } from './components/chat/MessageBubble'
 import { ChatInput } from './components/chat/ChatInput'
@@ -136,8 +138,9 @@ function WorkdirSelector({ current, onChanged, error }: {
     : '选择目录'
 
   return (
-    <div style={{ position: 'relative' }}>
+    <div className="workdir-selector" style={{ position: 'relative' }}>
       <button
+        className="workdir-trigger"
         onClick={() => { setDraft(current ?? ''); setEditing(o => !o); setBrowsing(false) }}
         title={`工作目录: ${current || '未设置'}`}
         style={{
@@ -152,7 +155,7 @@ function WorkdirSelector({ current, onChanged, error }: {
       >
         {error
           ? <AlertCircle size={ICON_SM} color="var(--red)" />
-          : <Circle size={8} fill="var(--green)" color="var(--green)" style={{ flexShrink: 0 }} />
+          : <Circle size={6} fill={current ? 'var(--green)' : 'var(--text-3)'} color={current ? 'var(--green)' : 'var(--text-3)'} style={{ flexShrink: 0 }} />
         }
         <FolderOpen size={ICON_SM} style={{ flexShrink: 0 }} color="var(--text-3)" />
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -268,146 +271,73 @@ export default function App() {
   const [changedFilesOpen, setChangedFilesOpen] = useState(false)
   const [workdirError, setWorkdirError] = useState(false)
   const [preFillInput, setPreFillInput] = useState('')
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const [agentMode, setAgentMode] = useState<AgentMode>('auto')
   const [currentModel, setCurrentModel] = useState<string>('')
   const [availableModels, setAvailableModels] = useState<ModelInfo[]>([])
   const [fileContexts, setFileContexts] = useState<FileContext[]>([])
   const bottomRef = useRef<HTMLDivElement>(null)
+  const sidebarToggleRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    if (!sidebarOpen) return
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setSidebarOpen(false)
+        sidebarToggleRef.current?.focus()
+      }
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [sidebarOpen])
 
   // Apply theme on mount
   useEffect(() => {
     applyTheme((() => { try { const v = localStorage.getItem('code-agent-theme'); if (v === 'dark' || v === 'light') return v; if (v === 'beige') return 'light' } catch {} return 'dark' })())
   }, [])
 
-  // Restore conversation history (页面加载 + socket 断线重连时都会调用)
-  const restoreHistory = () => {
-    api.history().then(data => {
-      if (data.history && data.history.length > 0) {
-        const restored: ChatMessage[] = []
-        type PendingStep = { type: 'thinking'; text: string } | { type: 'tool_call'; toolCall: ToolCall }
-
-        const buildToolCall = (name: string, input: Record<string, unknown>, id: string, ts_start: number): ToolCall => ({
-          id, run_id: '', name, input, status: 'running' as const, ts_start,
-        })
-
-        let currentUser: ChatMessage | null = null
-        let pendingSteps: PendingStep[] = []
-        let assistantText = ''
-        let assistantTs = 0
-        // Map of tool_use_id → index into pendingSteps, for pairing with results
-        let toolStepIndex: Map<string, number> = new Map()
-
-        const flushTurn = () => {
-          if (currentUser) {
-            restored.push(currentUser)
-            currentUser = null
-          }
-          if (pendingSteps.length > 0 || assistantText.trim()) {
-            // Build completed toolCalls list for backwards compat
-            const toolCalls: ToolCall[] = pendingSteps
-              .filter((s): s is { type: 'tool_call'; toolCall: ToolCall } => s.type === 'tool_call')
-              .map(s => s.toolCall)
-            restored.push({
-              id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${restored.length}`,
-              role: 'assistant' as const,
-              content: assistantText.trim(),
-              ts: assistantTs || Date.now(),
-              steps: pendingSteps.length > 0 ? pendingSteps as AssistantStep[] : undefined,
-              toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-            })
-            pendingSteps = []
-            toolStepIndex = new Map()
-            assistantText = ''
-            assistantTs = 0
-          }
-        }
-
-        for (let i = 0; i < data.history.length; i++) {
-          const m = data.history[i] as { role: string; content: unknown }
-          const ts = Date.now() - (data.history.length - i) * 1000
-
-          if (typeof m.content === 'string') {
-            // Real user message — flush previous turn
-            flushTurn()
-            restored.push({
-              id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${restored.length}`,
-              role: 'user',
-              content: m.content,
-              ts,
-            })
-          } else if (Array.isArray(m.content)) {
-            const blocks = m.content as Array<Record<string, unknown>>
-            const hasOnlyToolResults = blocks.length > 0 && blocks.every(b => b.type === 'tool_result')
-            if (hasOnlyToolResults && m.role === 'user') {
-              // Pair tool_results with pending tool_use steps
-              for (const blk of blocks) {
-                if (blk.type === 'tool_result') {
-                  const tid = blk.tool_use_id as string | undefined
-                  if (tid && toolStepIndex.has(tid)) {
-                    const idx = toolStepIndex.get(tid)!
-                    const step = pendingSteps[idx] as { type: 'tool_call'; toolCall: ToolCall }
-                    step.toolCall.status = 'done'
-                    step.toolCall.output = (blk.content as string) || ''
-                    step.toolCall.ts_end = ts
-                  }
-                }
-              }
-              continue
-            }
-            if (m.role === 'assistant') {
-              if (!assistantTs) assistantTs = ts
-              for (const blk of blocks) {
-                if (blk.type === 'thinking' && typeof blk.text === 'string') {
-                  pendingSteps.push({ type: 'thinking', text: blk.text })
-                } else if (blk.type === 'text' && typeof blk.text === 'string') {
-                  assistantText += blk.text
-                } else if (blk.type === 'tool_use') {
-                  const name = (blk.name as string) || ''
-                  const input = (blk.input as Record<string, unknown>) || {}
-                  const tid = (blk.tool_use_id as string) || `${name}_${pendingSteps.length}`
-                  const tc = buildToolCall(name, input, tid, ts)
-                  const idx = pendingSteps.length
-                  toolStepIndex.set(tid, idx)
-                  pendingSteps.push({ type: 'tool_call', toolCall: tc })
-                }
-              }
-            } else if (m.role === 'user') {
-              // User message with mixed content (text + images, not tool_results)
-              flushTurn()
-              const textParts: string[] = []
-              for (const blk of blocks) {
-                if (blk.type === 'text' && typeof blk.text === 'string') {
-                  textParts.push(blk.text)
-                }
-              }
-              const userContent = textParts.join('')
-              if (userContent) {
-                restored.push({
-                  id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${restored.length}`,
-                  role: 'user',
-                  content: userContent,
-                  ts,
-                })
-              }
-            }
-          }
-        }
-        flushTurn()
-
-        if (restored.length > 0) restoreMessages(restored)
-      }
-    }).catch(() => {})
-  }  // eslint-disable-line react-hooks/exhaustive-deps
-
-  // 页面加载时恢复一次历史
-  useEffect(() => { restoreHistory() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
-
   const {
-    messages, todos, toolCalls, agentState,
+    activeSessionId, activateSession, hydrateSession,
+    messages, todos, toolCalls, agentState, runId,
     pendingApprovals, changedFiles, planProposal, setPlanProposal,
     planOptions, setPlanOptions,
-    addUserMessage, handleEvent, clearAll, restoreMessages, dismissApproval, dismissPlan,
+    addUserMessage, handleEvent, clearAll, dismissApproval, dismissPlan,
   } = useChat()
+  const activeSessionRef = useRef<string | null>(null)
+  const selectionEpochRef = useRef(0)
+  const [sessionSwitching, setSessionSwitching] = useState(true)
+  const [sessionError, setSessionError] = useState('')
+  const [runningSessionId, setRunningSessionId] = useState<string | null>(null)
+
+  const applySessionSnapshot = useCallback((snapshot: SessionSnapshot, epoch: number) => {
+    if (epoch !== selectionEpochRef.current) return false
+    if (!snapshot.session_id || !Array.isArray(snapshot.events) || typeof snapshot.event_seq !== 'number') {
+      throw new Error('后端仍是旧版本，请在主机重启 Python 后端服务后刷新页面。')
+    }
+    hydrateSession(snapshot.session_id, historyToMessages(snapshot.history), snapshot)
+    activeSessionRef.current = snapshot.session_id
+    activateSession(snapshot.session_id)
+    if (snapshot.mode) setAgentMode(snapshot.mode)
+    if (snapshot.running) setRunningSessionId(snapshot.session_id)
+    else setRunningSessionId(previous => previous === snapshot.session_id ? null : previous)
+    return true
+  }, [activateSession, hydrateSession])
+
+  const restoreHistory = useCallback(async () => {
+    const epoch = ++selectionEpochRef.current
+    const selected = activeSessionRef.current
+    setSessionSwitching(true)
+    try {
+      const snapshot = await api.history(selected ?? undefined)
+      if (applySessionSnapshot(snapshot, epoch)) setSessionError('')
+    } catch (error) {
+      if (epoch === selectionEpochRef.current) setSessionError(error instanceof Error ? error.message : '无法恢复聊天')
+    } finally {
+      if (epoch === selectionEpochRef.current) setSessionSwitching(false)
+    }
+  }, [applySessionSnapshot])
+
+  useEffect(() => { void restoreHistory() }, [restoreHistory])
 
   // Merge consecutive messages with the same runId to avoid showing internal tool rounds
   const displayMessages = useMemo(() => {
@@ -432,18 +362,42 @@ export default function App() {
     return merged
   }, [messages])
 
-  const { sendMessage, sendInterrupt } = useAgentSocket({
-    onEvent: handleEvent,
+  const onAgentEvent = useCallback((event: AgentEvent) => {
+    handleEvent(event)
+    if (!event.session_id) return
+    if (event.type === 'run_start') setRunningSessionId(event.session_id)
+    if (event.type === 'run_end' || (event.type === 'error' && !event.run_id)) {
+      setRunningSessionId(previous => previous === event.session_id ? null : previous)
+    }
+    if (event.type === 'run_start' || event.type === 'run_end' || event.type === 'error') {
+      void qc.invalidateQueries({ queryKey: ['sessions'] })
+      void qc.invalidateQueries({ queryKey: ['agentStatus'] })
+    }
+  }, [handleEvent, qc])
+
+  const { sendMessage } = useAgentSocket({
+    onEvent: onAgentEvent,
     onStatusChange: setSocketStatus,
     onReconnect: restoreHistory,
   })
 
-  const { data: statusData, refetch: refetchStatus } = useQuery({
+  const {
+    data: statusData,
+    refetch: refetchStatus,
+    isLoading: statusLoading,
+    error: statusError,
+  } = useQuery({
     queryKey: ['agentStatus'],
     queryFn: () => api.status(),
     refetchInterval: 5000,
     retry: false,
   })
+
+  useEffect(() => {
+    if (statusData && 'running_session_id' in statusData) {
+      setRunningSessionId(statusData.running_session_id ?? null)
+    }
+  }, [statusData])
 
   // 检测工作目录是否有效
   useEffect(() => {
@@ -469,9 +423,11 @@ export default function App() {
     }).catch(() => {})
   }, [])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  const busy = agentState !== 'idle'
+  const busy = agentState !== 'idle' || (!!activeSessionId && runningSessionId === activeSessionId)
+  const backgroundRunning = !!runningSessionId && runningSessionId !== activeSessionId
 
   const handleSend = (text: string, attachments?: { images: ImageAttachment[]; fileContexts: FileContext[] }) => {
+    if (!activeSessionId || sessionSwitching || backgroundRunning || busy) return
     const images = attachments?.images ?? []
     const fctxs = attachments?.fileContexts ?? fileContexts.filter(fc => fc.included)
     // Build message content blocks
@@ -489,14 +445,14 @@ export default function App() {
     const content: string | ContentBlock[] = blocks.length === 1 && blocks[0].type === 'text'
       ? blocks[0].text
       : blocks
+    if (!sendMessage(content, agentMode, activeSessionId)) return
     addUserMessage(content)
-    sendMessage(content, agentMode)
+    setRunningSessionId(activeSessionId)
     setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
   }
 
   const handleCompress = () => {
-    addUserMessage('__compress__')
-    sendMessage('__compress__', agentMode)
+    handleSend('__compress__')
   }
 
   const handleAddToChat = useCallback((path: string, content: string) => {
@@ -511,66 +467,91 @@ export default function App() {
     setSelectedFile(null)
   }, [])
 
-  const handleInterrupt = () => {
-    sendInterrupt()
-    api.interrupt().catch(() => {})
+  const handleInterrupt = async () => {
+    const sessionId = activeSessionRef.current
+    if (!sessionId) return
+    try {
+      await api.interrupt(sessionId, runId ?? undefined)
+    } catch (error) {
+      setSessionError(error instanceof Error ? error.message : '停止失败，请重试')
+    }
   }
 
   const handleClearHistory = async () => {
-    await api.clearHistory()
-    clearAll()
-    qc.invalidateQueries({ queryKey: ['agentStatus'] })
+    const sessionId = activeSessionRef.current
+    if (!sessionId) return
+    try {
+      await api.clearHistory(sessionId)
+      if (activeSessionRef.current === sessionId) clearAll()
+      void qc.invalidateQueries({ queryKey: ['agentStatus'] })
+      void qc.invalidateQueries({ queryKey: ['sessions'] })
+    } catch (error) {
+      setSessionError(error instanceof Error ? error.message : '无法清空聊天')
+    }
   }
 
-  const handleNewSession = async () => {
-    // Save current session before starting new one
-    const userMessages = messages.filter(m => m.role === 'user')
-    const title = userMessages.length > 0
-      ? (typeof userMessages[0].content === 'string' ? userMessages[0].content.slice(0, 50) : '对话')
-      : `会话 ${new Date().toLocaleString('zh-CN')}`
+  const handleNewSession = async (workdir?: string) => {
+    const epoch = ++selectionEpochRef.current
+    setSessionSwitching(true)
+    setSessionError('')
     try {
-      await api.createSession(
-        `session_${Date.now()}`,
-        title,
-        messages.filter(m => m.role !== 'system').length
-      )
-    } catch {
-      // ignore save errors
+      const snapshot = await api.newSession(workdir)
+      if (applySessionSnapshot(snapshot, epoch)) {
+        setFileContexts([])
+        setChangedFilesOpen(false)
+        void qc.invalidateQueries({ queryKey: ['sessions'] })
+        void qc.invalidateQueries({ queryKey: ['agentStatus'] })
+        void qc.invalidateQueries({ queryKey: ['fileTree'] })
+      }
+    } catch (error) {
+      if (epoch === selectionEpochRef.current) setSessionError(error instanceof Error ? error.message : '新建聊天失败')
+    } finally {
+      if (epoch === selectionEpochRef.current) setSessionSwitching(false)
     }
-    await handleClearHistory()
-    setFileContexts([])
-    setChangedFilesOpen(false)
   }
 
   const handleLoadSession = async (sid: string) => {
+    const epoch = ++selectionEpochRef.current
+    setSessionSwitching(true)
+    setSessionError('')
     try {
-      const data = await api.loadSession(sid)
-      // Restore frontend messages
-      const restored: ChatMessage[] = (data.history || []).map((m: { role: string; content: unknown }) => ({
-        id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
-        role: m.role as ChatMessage['role'],
-        content: typeof m.content === 'string' ? m.content : (m.content as ContentBlock[]),
-        ts: Date.now(),
-      }))
-      restoreMessages(restored)
-      setFileContexts([])
-    } catch {
-      // ignore
+      const snapshot = await api.loadSession(sid)
+      if (applySessionSnapshot(snapshot, epoch)) {
+        setFileContexts([])
+        setChangedFilesOpen(false)
+        void qc.invalidateQueries({ queryKey: ['agentStatus'] })
+      }
+    } catch (error) {
+      if (epoch === selectionEpochRef.current) setSessionError(error instanceof Error ? error.message : '无法打开聊天')
+    } finally {
+      if (epoch === selectionEpochRef.current) setSessionSwitching(false)
     }
   }
 
   const handleWorkdirChanged = () => {
-    refetchStatus()
-    qc.invalidateQueries({ queryKey: ['fileTree'] })
-    clearAll()
+    void refetchStatus()
+    void qc.invalidateQueries({ queryKey: ['fileTree'] })
+    const epoch = ++selectionEpochRef.current
+    setSessionSwitching(true)
+    void api.history().then(snapshot => {
+      if (applySessionSnapshot(snapshot, epoch)) {
+        setFileContexts([])
+        setSessionError('')
+      }
+    }).catch(error => {
+      if (epoch === selectionEpochRef.current) setSessionError(error instanceof Error ? error.message : '切换项目失败')
+    }).finally(() => {
+      if (epoch === selectionEpochRef.current) setSessionSwitching(false)
+    })
   }
 
   const handleApprove = async (toolUseId: string, approved: boolean) => {
-    dismissApproval(toolUseId)
+    const approval = pendingApprovals.find(item => item.id === toolUseId)
     try {
-      await api.toolApprove(toolUseId, approved)
-    } catch (e) {
-      console.warn('approve error:', e)
+      await api.toolApprove(toolUseId, approved, activeSessionId ?? undefined, approval?.run_id)
+      dismissApproval(toolUseId)
+    } catch (error) {
+      setSessionError(error instanceof Error ? error.message : '审批提交失败')
     }
   }
 
@@ -582,7 +563,7 @@ export default function App() {
     }
     dismissPlan()
     setAgentMode('auto')
-    api.executePlan(planContent, todos).catch((e) => {
+    api.executePlan(planContent, todos, activeSessionId ?? undefined).catch((e) => {
       console.error('executePlan error:', e)
     })
     setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
@@ -592,16 +573,14 @@ export default function App() {
     setPlanProposal(prev => prev ? { ...prev, status: 'rejected' } : null)
     dismissPlan()
     const rejectMsg = '请重新规划，考虑不同的方案'
-    addUserMessage(rejectMsg)
-    sendMessage(rejectMsg, agentMode)
+    handleSend(rejectMsg)
     setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
   }
 
   const handlePlanModify = async (_planRunId: string, feedback: string) => {
     dismissPlan()
     const modifyMsg = `请根据以下反馈修改计划：\n${feedback}`
-    addUserMessage(modifyMsg)
-    sendMessage(modifyMsg, agentMode)
+    handleSend(modifyMsg)
     setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
   }
 
@@ -643,38 +622,35 @@ export default function App() {
 
   return (
     <div
-      style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg-base)', position: 'relative' }}
+      className="workbench"
       onDragOver={e => { e.preventDefault() }}
       onDrop={handleMainDrop}
     >
       {/* ─── Title bar ──────────────────────────────── */}
-      <header style={{
-        display: 'flex', alignItems: 'center', gap: 10,
-        padding: '0 12px', height: 44, flexShrink: 0,
-        borderBottom: '1px solid var(--border)',
-        background: 'var(--bg-surface)',
-        position: 'relative', zIndex: 40,
-      }}>
-        {/* Left: Logo + WorkdirSelector */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-          <div style={{
-            width: 26, height: 26, borderRadius: 8, flexShrink: 0,
-            background: 'linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: 'var(--shadow-sm), inset 0 1px 0 rgba(255,255,255,.18)',
-          }}>
-            <Bot size={15} strokeWidth={2.2} color="#fff" />
-          </div>
-          <span style={{ fontWeight: 700, fontSize: 13.5, letterSpacing: '0.01em', color: 'var(--text-1)', marginRight: 4 }}>Code Agent</span>
+      <header className="workbench-header">
+        <div className="app-brand">
+          <button
+            ref={sidebarToggleRef}
+            className="sidebar-toggle icon-button"
+            onClick={() => setSidebarOpen(open => !open)}
+            aria-label={sidebarOpen ? '关闭项目侧栏' : '打开项目侧栏'}
+            aria-expanded={sidebarOpen}
+            aria-controls="project-sidebar"
+          >
+            {sidebarOpen ? <X size={18} /> : <PanelLeft size={18} />}
+          </button>
+          <span className="brand-mark"><Terminal size={19} strokeWidth={2} /></span>
+          <span className="brand-wordmark">Code Agent<span className="brand-caption">你的编程伙伴</span></span>
+        </div>
+        <div className="header-workdir">
+          <span className="header-breadcrumb">工作区 <ChevronRight size={12} /></span>
           <WorkdirSelector
             current={statusData?.workdir}
             onChanged={handleWorkdirChanged}
             error={workdirError}
           />
         </div>
-
-        <div style={{ flex: 1 }} />
-
+        <div className="header-actions">
         {/* Changed files indicator */}
         {changedFiles.length > 0 && (
           <button
@@ -694,14 +670,16 @@ export default function App() {
         )}
 
         {/* Context panel (replaces old compression button) */}
-        <ContextPanel
-          tokenBreakdown={statusData?.token_breakdown}
-          onCompress={handleCompress}
-          busy={busy}
-        />
+        <div className="header-context">
+          <ContextPanel
+            tokenBreakdown={statusData?.token_breakdown}
+            onCompress={handleCompress}
+            busy={busy}
+          />
+        </div>
 
         {/* model name */}
-        <span style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>
+        <span className="header-model">
           {statusData?.model?.replace('claude-', '').replace('deepseek-v4-', 'V4 ').replace('deepseek-', '')}
         </span>
 
@@ -710,10 +688,12 @@ export default function App() {
         <button
           onClick={handleClearHistory}
           title="清空对话"
-          style={iconBtn(false)}
+          aria-label="清空对话"
+          className="icon-button clear-chat-button"
         >
           <Trash2 size={ICON_MD - 1} strokeWidth={1.8} />
         </button>
+        </div>
       </header>
 
       {/* ─── Changed files dropdown ───────────────────── */}
@@ -721,9 +701,9 @@ export default function App() {
         <>
           <div style={{ position: 'fixed', inset: 0, zIndex: 39 }} onClick={() => setChangedFilesOpen(false)} />
           <div style={{
-            position: 'absolute', top: 44, right: 12, zIndex: 50,
+            position: 'absolute', top: 64, right: 12, zIndex: 50,
             background: 'var(--bg-overlay)', border: '1px solid var(--border-hi)',
-            borderRadius: 8, padding: '8px 0', minWidth: 300,
+            borderRadius: 12, padding: '8px 0', width: 'min(340px, calc(100vw - 24px))',
             boxShadow: 'var(--shadow-lg)',
             maxHeight: 400, overflow: 'auto',
           }}>
@@ -763,107 +743,77 @@ export default function App() {
       )}
 
       {/* ─── Main layout ─────────────────────────────── */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-
+      <div className="workbench-body">
+        {sidebarOpen && <button className="sidebar-backdrop" aria-label="关闭项目侧栏遮罩" onClick={() => setSidebarOpen(false)} />}
         {/* Left sidebar: sessions + file tree */}
+        <div id="project-sidebar" className={`sidebar-shell${sidebarOpen ? ' is-open' : ''}`}>
         <Sidebar
-          onNewSession={handleNewSession}
-          onNewProjectSession={async path => {
-            try {
-              await handleNewSession()
-              if (statusData?.workdir !== path) {
-                await api.setWorkdir(path)
-                handleWorkdirChanged()
-              }
-            } catch {
-              setWorkdirError(true)
-            }
+          onNewSession={() => { setSidebarOpen(false); void handleNewSession() }}
+          onNewProjectSession={path => {
+            setSidebarOpen(false)
+            void handleNewSession(path)
           }}
-          onLoadSession={handleLoadSession}
+          onLoadSession={sid => { setSidebarOpen(false); void handleLoadSession(sid) }}
           workdir={statusData?.workdir}
+          activeSessionId={activeSessionId ?? undefined}
           onProjectChange={async dirPath => {
             try {
               await api.setWorkdir(dirPath)
               handleWorkdirChanged()
+              setSidebarOpen(false)
             } catch (error) {
               setWorkdirError(true)
               throw error
             }
           }}
         />
+        </div>
 
         {/* ─── Chat area ─────────────────────────────── */}
-        <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
+        <main className="chat-workspace">
           {/* Messages scroll area */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: '24px 20px' }}>
+          <div className={`conversation-scroll${messages.length === 0 ? ' is-empty' : ''}`}>
             {messages.length === 0 && (
-              <div style={{ textAlign: 'center', marginTop: '11vh', animation: 'fadeIn 0.3s ease' }}>
-                <div style={{
-                  width: 60, height: 60, borderRadius: 18, margin: '0 auto 18px',
-                  background: 'linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  boxShadow: '0 10px 32px var(--accent-border), inset 0 1px 0 rgba(255,255,255,.22)',
-                }}>
-                  <Bot size={30} strokeWidth={1.8} color="#fff" />
+              <section className="welcome-screen" aria-labelledby="welcome-title">
+                <div className="welcome-eyebrow"><span /> 你的本地 AI 工作台</div>
+                <h1 id="welcome-title">让想法，<span>成为代码。</span></h1>
+                <p className="welcome-description">理解项目、探索方案、完成修改。<br className="mobile-break" />从这里开始你的下一次构建。</p>
+                <div className={`welcome-project${workdirError ? ' has-error' : ''}`}>
+                  <FolderOpen size={14} />
+                  <span title={statusData?.workdir}>
+                    {statusData?.workdir
+                      ? statusData.workdir.replace(/[\\/]$/, '').split(/[\\/]/).filter(Boolean).at(-1)
+                      : statusLoading ? '正在连接工作区…' : '连接本地服务后，选择一个项目'}
+                  </span>
+                  {workdirError && <span className="welcome-project-error">目录不可访问</span>}
                 </div>
-                <p style={{ color: 'var(--text-1)', fontSize: 21, fontWeight: 700, letterSpacing: '-0.01em', margin: '0 0 8px' }}>
-                  Code Agent 已就绪
-                </p>
-                <p style={{ color: 'var(--text-3)', fontSize: 13, margin: '0 0 4px' }}>
-                  工作目录：
-                  <code style={{
-                    fontFamily: 'var(--font-mono)', fontSize: 12,
-                    padding: '2px 8px', borderRadius: 6,
-                    background: 'var(--bg-raised)', border: '1px solid var(--border)',
-                    color: workdirError ? 'var(--red)' : 'var(--text-2)',
-                  }}>
-                    {statusData?.workdir || '未初始化'}
-                  </code>
-                  {workdirError && (
-                    <span style={{ marginLeft: 6, color: 'var(--red)', fontSize: 11 }}>
-                      目录不可访问
-                    </span>
-                  )}
-                </p>
-                <p style={{ color: 'var(--text-3)', fontSize: 12, margin: '0 0 26px' }}>
-                  点击顶部目录名可切换到其他项目 · 使用 + 号添加文件或选择模型
-                </p>
-                <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap', maxWidth: 560, margin: '0 auto' }}>
-                  {['分析项目结构', '列出所有 Python 文件', '查找 TODO 注释', '解释 main.py 的功能'].map(hint => (
-                    <button
-                      key={hint}
-                      onClick={() => handleSend(hint)}
-                      style={{
-                        padding: '8px 16px', borderRadius: 999,
-                        border: '1px solid var(--border-hi)',
-                        background: 'var(--bg-surface)',
-                        boxShadow: 'var(--shadow-sm)',
-                        color: 'var(--text-2)', fontSize: 12.5,
-                        cursor: 'pointer', transition: 'all 0.18s ease',
-                      }}
-                      onMouseOver={e => {
-                        e.currentTarget.style.background = 'var(--accent-soft)'
-                        e.currentTarget.style.color = 'var(--accent-2)'
-                        e.currentTarget.style.borderColor = 'var(--accent-border)'
-                        e.currentTarget.style.transform = 'translateY(-1px)'
-                        e.currentTarget.style.boxShadow = 'var(--shadow-md)'
-                      }}
-                      onMouseOut={e => {
-                        e.currentTarget.style.background = 'var(--bg-surface)'
-                        e.currentTarget.style.color = 'var(--text-2)'
-                        e.currentTarget.style.borderColor = 'var(--border-hi)'
-                        e.currentTarget.style.transform = 'translateY(0)'
-                        e.currentTarget.style.boxShadow = 'var(--shadow-sm)'
-                      }}
-                    >
-                      {hint}
+                <div className="welcome-suggestions" aria-label="开始一个任务">
+                  {[
+                    { icon: Layers3, title: '梳理项目', description: '快速了解目录结构与技术栈', prompt: '请分析当前项目的目录结构、技术栈和主要入口。' },
+                    { icon: Code2, title: '读懂代码', description: '理清核心逻辑与模块关系', prompt: '请找到项目的主要入口，并解释核心模块之间的调用关系。' },
+                    { icon: Search, title: '寻找线索', description: '搜索 TODO 与待完善的细节', prompt: '请查找项目中的 TODO 注释，并按模块整理待办事项。' },
+                    { icon: Pencil, title: '一起改进', description: '发现可以优化的实现', prompt: '请审查当前项目，找出值得优先改进的问题，并先给出建议。' },
+                  ].map(({ icon: Icon, title, description, prompt }) => (
+                    <button className="suggestion-card" key={title} onClick={() => setPreFillInput(prompt)}>
+                      <span className="suggestion-icon"><Icon size={18} strokeWidth={1.7} /></span>
+                      <span className="suggestion-copy"><strong>{title}</strong><span>{description}</span></span>
+                      <ArrowUpRight className="suggestion-arrow" size={16} />
                     </button>
                   ))}
                 </div>
-              </div>
+                {!statusData?.workdir && !statusLoading && (
+                  <div className="connection-notice" role="status">
+                    <AlertCircle size={14} />
+                    <span>{statusError instanceof Error && statusError.message.includes('Agent not initialized')
+                      ? '工作区正在准备中，请检查本地服务的初始化状态。'
+                      : '本地服务尚未连接，启动后即可开始对话。'}</span>
+                    <button onClick={() => { void refetchStatus() }}>重新连接</button>
+                  </div>
+                )}
+              </section>
             )}
 
-            <div style={{ maxWidth: 800, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <div className="conversation-messages">
               {displayMessages.map(msg => (
                 <MessageBubble key={msg.id} msg={msg} />
               ))}
@@ -893,8 +843,10 @@ export default function App() {
                 options={planOptions}
                 onSelect={(optionId) => {
                   setPlanOptions(null)
-                  addUserMessage(`选择: ${optionId}`)
-                  sendMessage(`选择: ${optionId}`, 'plan')
+                  if (activeSessionId && sendMessage(`选择: ${optionId}`, 'plan', activeSessionId)) {
+                    addUserMessage(`选择: ${optionId}`)
+                    setRunningSessionId(activeSessionId)
+                  }
                 }}
               />
             </div>
@@ -913,14 +865,19 @@ export default function App() {
             </div>
           )}
 
+          {sessionError && <div className="session-notice is-error" role="alert"><AlertCircle size={14} /><span>{sessionError}</span><button aria-label="关闭聊天提示" onClick={() => setSessionError('')}><X size={14} /></button></div>}
+          {backgroundRunning && <div className="session-notice" role="status"><Circle size={6} fill="currentColor" /><span>上一段对话仍在生成，你可以先写下新的想法。</span><button onClick={() => { if (runningSessionId) void handleLoadSession(runningSessionId) }}>返回并查看</button></div>}
           {/* Input */}
           <ChatInput
+            key={activeSessionId ?? 'connecting'}
+            sessionId={activeSessionId ?? undefined}
             onSend={handleSend}
             onInterrupt={handleInterrupt}
             onClearHistory={handleClearHistory}
             onCompress={handleCompress}
             busy={busy}
             disabled={socketStatus !== 'connected'}
+            sendDisabled={sessionSwitching || backgroundRunning || !activeSessionId}
             mode={agentMode}
             onModeChange={setAgentMode}
             currentModel={currentModel}
@@ -974,15 +931,4 @@ export default function App() {
       <FilePreview path={selectedFile} onClose={() => setSelectedFile(null)} onAddToChat={handleAddToChat} />
     </div>
   )
-}
-
-function iconBtn(active: boolean): React.CSSProperties {
-  return {
-    width: 30, height: 30, borderRadius: 6,
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    background: active ? 'var(--bg-overlay)' : 'none',
-    border: active ? '1px solid var(--border-hi)' : '1px solid transparent',
-    color: active ? 'var(--text-1)' : 'var(--text-3)',
-    cursor: 'pointer', transition: 'all 0.15s',
-  }
 }
