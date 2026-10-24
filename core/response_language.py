@@ -59,7 +59,7 @@ def _default_language(text: str) -> str | None:
     return None
 
 
-def _request_language(messages: list) -> str | None:
+def request_language(messages: list) -> str | None:
     """Select a default from human prose, before tools can replace the context."""
     for message in reversed(messages):
         if message.get("role") != "user":
@@ -126,7 +126,7 @@ def _language_reminder(language: str | None) -> str:
 
 
 def response_language_instructions(messages: list) -> str:
-    language = _request_language(messages)
+    language = request_language(messages)
     if language is None:
         return RESPONSE_LANGUAGE_POLICY
     return (
@@ -137,7 +137,7 @@ def response_language_instructions(messages: list) -> str:
 
 
 def response_language_reminder(messages: list) -> str:
-    return _language_reminder(_request_language(messages))
+    return _language_reminder(request_language(messages))
 
 
 def with_response_language_reminder(messages: list, reminder: str) -> list:

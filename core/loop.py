@@ -9,8 +9,9 @@ from anthropic.types import TextBlock
 from components.compactor import microcompact, auto_compact, estimate_tokens
 from components.background_manager import BackgroundManager
 from components.message_bus import MessageBus
+from core.continuation import needs_action_continuation, continuation_prompt, unfinished_notice
 from core.response_language import (
-    response_language_instructions, response_language_reminder,
+    request_language, response_language_instructions, response_language_reminder,
     with_response_language_reminder,
 )
 
@@ -267,6 +268,9 @@ class AgentLoop:
         plan_todo_used = False  # Only fire plan_proposed after TodoWrite was used
         request_system = self.system + "\n\n" + response_language_instructions(messages)
         language_reminder = response_language_reminder(messages)
+        language = request_language(messages)
+        continuation_attempts = 0
+        pending_continuation = None
 
         self._emit({
             "type": "run_start",
@@ -323,10 +327,16 @@ class AgentLoop:
                         _batch_text = ""
                     _last_flush = time.time()
 
+                request_messages = messages
+                if pending_continuation:
+                    # Keep each streamed assistant round in history, while the
+                    # controller's recovery instruction stays request-local.
+                    request_messages = [*messages, {"role": "user", "content": pending_continuation}]
+                    pending_continuation = None
                 with self.client.messages.stream(
                     model=self.model,
                     system=request_system,
-                    messages=with_response_language_reminder(messages, language_reminder),
+                    messages=with_response_language_reminder(request_messages, language_reminder),
                     tools=api_tools,
                     max_tokens=8000,
                 ) as stream:
@@ -409,6 +419,23 @@ class AgentLoop:
                     tool_blocks = []
 
                 if not tool_blocks:
+                    if (not plan_mode and api_tools and response.stop_reason == "end_turn"
+                            and needs_action_continuation(round_text)):
+                        # For ambiguous user prose, preserve the language the
+                        # assistant already chose for this round.
+                        language = language or request_language([{"role": "user", "content": round_text}])
+                        if continuation_attempts < 1:
+                            continuation_attempts += 1
+                            pending_continuation = continuation_prompt(language)
+                            self._check_interrupt()
+                            continue
+                        notice = unfinished_notice(language)
+                        messages[-1]["content"] = [*response.content, TextBlock(type="text", text=notice)]
+                        final_text = round_text + notice
+                        self._emit({
+                            "type": "chunk", "text": notice,
+                            "run_id": self._current_run_id, "ts": time.time(),
+                        })
                     # No tool calls - end of turn
                     if not round_text.strip():
                         # 模型返回了空内容：给前端一个明确提示，避免"无反应"

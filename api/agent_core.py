@@ -115,6 +115,7 @@ def _build_system_prompt(cfg, skills, mode: str = None) -> str:
 - Tasks touching >3 files or involving architecture: create a brief numbered plan first, get approval, then execute.
 - Exploratory questions ("how could we improve X?"): 2-3 sentences with recommendation and main tradeoff.
 - Repository analysis: read root documentation, project manifests, and actual entry-point source files before summarizing the architecture. Do not treat dependency, vendor, cache, or build directories as project code.
+- If you announce an authorized tool action, actually call the tool and continue from its result. Do not end with only a promise to act or a request to wait; finish with findings, or state the specific blocker that needs user input.
 
 ## When executing
 - Read relevant files before editing them.
