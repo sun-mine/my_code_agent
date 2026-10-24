@@ -80,8 +80,11 @@ def run_list_files(path: str = ".", depth: int = 2) -> str:
             level = rel.count(os.sep)
             if level >= depth:
                 dirs.clear()
-            # Skip hidden dirs
-            dirs[:] = [d for d in dirs if not d.startswith(".")]
+            # Skip hidden and generated dependency/cache dirs during traversal.
+            dirs[:] = [
+                d for d in dirs
+                if not d.startswith(".") and d not in {"node_modules", "__pycache__"}
+            ]
             for f in sorted(files):
                 if not f.startswith("."):
                     lines.append(os.path.join(rel, f))

@@ -9,6 +9,7 @@ from anthropic.types import TextBlock
 from components.compactor import microcompact, auto_compact, estimate_tokens
 from components.background_manager import BackgroundManager
 from components.message_bus import MessageBus
+from core.response_language import response_language_instructions
 
 # 需要用户审批才能执行的工具（在 manual 模式下会触发审批回调）
 APPROVAL_TOOLS = {"bash", "write_file", "edit_file", "task", "background_run"}
@@ -261,6 +262,7 @@ class AgentLoop:
         final_text = ""
         plan_text = ""        # Accumulate all assistant text in plan mode
         plan_todo_used = False  # Only fire plan_proposed after TodoWrite was used
+        request_system = self.system + "\n\n" + response_language_instructions(messages)
 
         self._emit({
             "type": "run_start",
@@ -319,7 +321,7 @@ class AgentLoop:
 
                 with self.client.messages.stream(
                     model=self.model,
-                    system=self.system,
+                    system=request_system,
                     messages=messages,
                     tools=api_tools,
                     max_tokens=8000,

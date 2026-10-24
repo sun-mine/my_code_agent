@@ -62,7 +62,6 @@ def _build_system_prompt(cfg, skills, mode: str = None) -> str:
     block1 = f"""You are Code Agent, an interactive AI that helps users with software engineering tasks at {cfg.workdir}.
 
 ## Communication
-- Output in the user's language (default Chinese if the user writes in Chinese).
 - Keep responses concise: ≤150 words for final answers, ≤30 words between tool calls.
 - No emojis unless the user explicitly asks. Do not add emoji to messages.
 - End each turn with: what changed (1 sentence), what's next (1 sentence). Nothing more.
