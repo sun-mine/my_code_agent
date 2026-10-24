@@ -6,7 +6,10 @@ from anthropic.types import TextBlock, ToolUseBlock
 
 import core.loop as loop_module
 from core.loop import AgentLoop
-from core.response_language import response_language_instructions
+from core.response_language import (
+    response_language_instructions, response_language_reminder,
+    with_response_language_reminder,
+)
 
 
 def user(content):
@@ -86,6 +89,29 @@ def test_actual_chinese_plan_feedback_can_change_the_reply_language():
     assert "Default reply language for this turn: 中文 (Chinese)." in instructions
 
 
+@pytest.mark.parametrize("content", [
+    "请分析项目结构。",
+    [{"type": "tool_result", "tool_use_id": "call-1", "content": "English package metadata"}],
+    [{"type": "image", "source": {}}, {"type": "text", "text": "请分析图片。"}],
+])
+def test_request_reminder_does_not_modify_history_or_tool_result_order(content):
+    history = [user(content)]
+    before = deepcopy(history)
+    reminder = response_language_reminder([user("请分析项目")])
+    first_request = with_response_language_reminder(history, reminder)
+    second_request = with_response_language_reminder(history, reminder)
+
+    assert history == before
+    assert first_request == second_request
+    augmented = first_request[-1]["content"]
+    if isinstance(content, list):
+        assert augmented[:-1] == content
+        assert augmented[-1] == {"type": "text", "text": f"<response-language>\n{reminder}\n</response-language>"}
+    else:
+        assert augmented.startswith(content + "\n\n")
+        assert augmented.count("<response-language>") == 1
+
+
 class RecordingMessages:
     def __init__(self):
         self.requests = []
@@ -143,8 +169,13 @@ def test_language_survives_tools_compaction_and_changes_on_next_user_turn(monkey
     assert len(recording.requests) == 2
     for request in recording.requests:
         assert f"Default reply language for this turn: {language}." in request["system"]
+        last_content = request["messages"][-1]["content"]
+        reminder = last_content[-1]["text"] if isinstance(last_content, list) else last_content
+        assert "<response-language>" in reminder
+        assert ("所有说明、标题、计划和结论均用中文" if language == "中文 (Chinese)" else "Write all explanations, headings, plans and conclusions in English") in reminder
     assert recording.requests[0]["system"] == recording.requests[1]["system"]
     assert agent.system == "Base instructions"
+    assert "<response-language>" not in str(history)
     if not compact:
         assert recording.requests[1]["messages"][-1]["content"][0]["content"] == "English package metadata"
 
