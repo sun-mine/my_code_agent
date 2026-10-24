@@ -17,5 +17,8 @@
     "url": "https://github.com/sun-mine/my_code_agent/issues"
   },
   "homepage": "https://github.com/sun-mine/my_code_agent#readme",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "docx": "^9.14.0"
+  }
 }
