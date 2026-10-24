@@ -1,4 +1,4 @@
-import json, re, subprocess, time
+import json, re, subprocess
 from pathlib import Path
 from components.event_bus import EventBus
 

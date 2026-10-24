@@ -93,13 +93,6 @@ export interface ModelInfo {
   provider: string
 }
 
-// ── Plan ──────────────────────────────────────────
-export interface PlanOption {
-  id: string
-  label: string
-  description?: string | null
-}
-
 // ── 工具事件 ──────────────────────────────────────
 export type AgentEventType =
   | 'run_start' | 'run_end'
@@ -131,24 +124,6 @@ export interface AgentEvent {
   message?: string
 }
 
-// ── 文件变更 ──────────────────────────────────────
-export interface FileChange {
-  path: string
-  op: 'create' | 'modify' | 'delete'
-}
-
-// ── 任务 ──────────────────────────────────────────
-export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'deleted'
-
-export interface Task {
-  id: number
-  subject: string
-  description: string
-  status: TaskStatus
-  owner: string
-  blockedBy: number[]
-}
-
 // ── Todo ──────────────────────────────────────────
 export type TodoStatus = 'pending' | 'in_progress' | 'completed'
 
@@ -156,35 +131,6 @@ export interface TodoItem {
   content: string
   status: TodoStatus
   activeForm: string
-}
-
-// ── 团队 ──────────────────────────────────────────
-export type MemberStatus = 'working' | 'idle' | 'shutdown'
-
-export interface TeamMember {
-  name: string
-  role: string
-  status: MemberStatus
-}
-
-// ── 安全快照 ──────────────────────────────────────
-export interface Checkpoint {
-  id: string
-  name: string
-  description: string
-  created_at: number
-  datetime: string
-  size: number
-  paths: string[]
-}
-
-// ── 文件树 ──────────────────────────────────────
-export interface FileNode {
-  name: string
-  type: 'file' | 'dir'
-  path: string
-  size?: number
-  children?: FileNode[]
 }
 
 // ── Token usage ────────────────────────────────────
@@ -202,24 +148,6 @@ export interface TokenBreakdown {
   tool_tokens: number
   messages_tokens: number
   user_context_tokens: number
-}
-
-// ── 总结卡片 ──────────────────────────────────────
-export interface SummaryCard {
-  id: string
-  type: 'summary'
-  run_id: string
-  input_tokens: number
-  output_tokens: number
-  tool_rounds: number
-  file_operations: number
-  ts: number
-}
-
-// ── 文件差异 ──────────────────────────────────────
-export interface FileDiff {
-  path: string
-  diff: string
 }
 
 // ── API 响应包装 ───────────────────────────────────

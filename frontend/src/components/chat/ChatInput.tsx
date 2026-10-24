@@ -24,7 +24,6 @@ interface ChatInputProps {
   onFileContextRemove?: (path: string) => void
   preFill?: string
   onPreFillConsumed?: () => void
-  workdir?: string
 }
 
 const MODES: { mode: AgentMode; label: string; desc: string }[] = [
@@ -49,7 +48,7 @@ export function ChatInput({
   sessionId, onSend, onInterrupt, onClearHistory, onCompress, busy, disabled, sendDisabled,
   mode, onModeChange, currentModel, onModelChange, availableModels,
   fileContexts, onFileContextToggle, onFileContextAdd, onFileContextRemove,
-  preFill, onPreFillConsumed, workdir,
+  preFill, onPreFillConsumed,
 }: ChatInputProps) {
   const [draft, setDraft] = useState(() => sessionId ? sessionDrafts.get(sessionId)?.draft ?? '' : '')
   const [images, setImages] = useState<ImageAttachment[]>(() => sessionId ? sessionDrafts.get(sessionId)?.images ?? [] : [])

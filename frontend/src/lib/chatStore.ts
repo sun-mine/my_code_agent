@@ -38,9 +38,9 @@ export interface PlanOption {
   description?: string | null
 }
 
-export type AgentState = 'idle' | 'thinking' | 'executing_tool'
+type AgentState = 'idle' | 'thinking' | 'executing_tool'
 
-export interface ChatSessionState {
+interface ChatSessionState {
   messages: ChatMessage[]
   todos: TodoItem[]
   toolCalls: ToolCall[]
@@ -179,10 +179,6 @@ export class ChatStore {
     return this.activeSessionId
   }
 
-  isSessionCached(sessionId: string): boolean {
-    return (this.sessions.get(sessionId)?.hydratedBoundary ?? -1) >= 0
-  }
-
   getSessionState(sessionId: string): ChatSessionState | undefined {
     return this.sessions.get(sessionId)?.state
   }
@@ -275,16 +271,6 @@ export class ChatStore {
       entry.lastEventSeq = lastEventSeq
       entry.hydratedBoundary = hydratedBoundary
       entry.lastSnapshotRunning = false
-    })
-  }
-
-  restoreMessages(messages: ChatMessage[]): void {
-    this.updateActive(entry => {
-      const lastEventSeq = entry.lastEventSeq
-      const hydratedBoundary = entry.hydratedBoundary
-      Object.assign(entry, createEntry(messages))
-      entry.lastEventSeq = lastEventSeq
-      entry.hydratedBoundary = hydratedBoundary
     })
   }
 

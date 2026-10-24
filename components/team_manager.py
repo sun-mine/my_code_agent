@@ -1,7 +1,6 @@
 import json
 import threading
 import time
-from queue import Queue
 from anthropic import Anthropic
 from components.message_bus import MessageBus
 from components.task_manager import TaskManager

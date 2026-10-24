@@ -132,7 +132,7 @@ export function ContextPanel({ tokenBreakdown, onCompress, busy }: ContextPanelP
 
             {/* Category breakdown */}
             <div style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
-              {categories.map((cat, i) => (
+              {categories.map(cat => (
                 <div key={cat.key}>
                   {cat.key === 'messages' ? (
                     <>

@@ -21,7 +21,7 @@ from components.background_manager import BackgroundManager
 from components.skill_loader import SkillLoader
 from core.loop import AgentLoop
 from tools import (
-    get_all_tools, create_all_handlers, get_core_tools,
+    create_all_handlers, get_core_tools,
     get_tools_by_categories, create_handlers_for_categories, get_all_categories,
 )
 from tools.base import set_workdir

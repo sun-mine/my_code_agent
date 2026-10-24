@@ -13,11 +13,6 @@ def bg_run_handler(bg, **kw):
 def bg_check_handler(bg, **kw):
     return bg.check(kw.get("task_id"))
 
-BG_HANDLERS = {
-    "background_run": bg_run_handler,
-    "check_background": bg_check_handler,
-}
-
 def get_tools():
     return BG_TOOLS
 

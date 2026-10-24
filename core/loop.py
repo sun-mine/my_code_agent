@@ -5,7 +5,7 @@ import time
 import uuid
 from typing import List, Dict, Any, Callable, Optional
 from anthropic import Anthropic
-from anthropic.types import TextBlock, ToolUseBlock
+from anthropic.types import TextBlock
 from components.compactor import microcompact, auto_compact, estimate_tokens
 from components.background_manager import BackgroundManager
 from components.message_bus import MessageBus

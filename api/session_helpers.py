@@ -1,7 +1,6 @@
 """响应封装、会话存储与快照工具。"""
 import time
 from pathlib import Path
-from typing import Optional
 
 from flask import jsonify
 

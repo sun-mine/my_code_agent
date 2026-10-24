@@ -29,7 +29,7 @@ Code Agent 将对话、项目目录和代码工具放在同一个界面中。项
 | Agent 与模型接口 | Anthropic Python SDK、Anthropic Messages API 兼容服务 | 组织模型请求和工具调用；默认连接 Ollama |
 | 前端语言 | TypeScript 6、React 19 | 构建类型安全的交互式工作台 |
 | 前端构建 | Vite 8、`@vitejs/plugin-react` | 本地开发服务器和生产构建 |
-| UI 与样式 | Tailwind CSS 4、Radix UI、Lucide React | 样式工具、可访问的基础组件和图标 |
+| UI 与样式 | Tailwind CSS 4、Lucide React | 样式工具与图标 |
 | 前端数据 | TanStack Query、React Hooks | 请求缓存、界面状态和异步数据管理 |
 | Markdown 与代码 | React Markdown、remark-gfm、Shiki | 渲染 Markdown、GFM 和代码高亮 |
 | 默认模型服务 | Ollama（`qwen2.5:3b`） | 在本机运行模型；也可切换到兼容 Anthropic API 的服务 |

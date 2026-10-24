@@ -1,8 +1,6 @@
 
 import json
-import os
 import time
-from pathlib import Path
 from anthropic import Anthropic
 from dotenv import load_dotenv
 
@@ -21,7 +19,6 @@ from components.memory_manager import MemoryManager
 from components.safety_manager import SafetyManager
 from components.error_recovery import ErrorRecoveryManager, init_error_recovery
 from tools import get_all_tools, create_all_handlers
-# 在 agent.py 中，创建 handlers 后添加：
 from core.subagent import run_subagent
 
 def main():

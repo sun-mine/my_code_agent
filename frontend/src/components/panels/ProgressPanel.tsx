@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Check, ChevronDown, ChevronUp, Loader2 } from 'lucide-react'
+import { Check, ChevronUp, Loader2 } from 'lucide-react'
 import type { TodoItem } from '../../lib/types'
 import { ICON_SM } from '../../lib/icons'
 

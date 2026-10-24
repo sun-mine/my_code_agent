@@ -27,8 +27,6 @@ def team_handlers_factory(team, bus, tmgr):
         "claim_task": lambda **kw: tmgr.claim(kw["task_id"], "lead"),
     }
 
-TEAM_HANDLERS = team_handlers_factory
-
 def get_tools():
     return TEAM_TOOLS
 

@@ -4,10 +4,7 @@ import { chatStore, type HydrateSnapshot } from '../lib/chatStore'
 
 export type {
   ApprovalRequest,
-  ChatSessionState,
   FileChange,
-  PlanOption,
-  PlanProposal,
   ToolCall,
 } from '../lib/chatStore'
 
@@ -39,7 +36,6 @@ export function useChat() {
   }, [])
 
   const clearAll = useCallback(() => chatStore.clearAll(), [])
-  const restoreMessages = useCallback((messages: ChatMessage[]) => chatStore.restoreMessages(messages), [])
   const dismissApproval = useCallback((id: string) => chatStore.dismissApproval(id), [])
   const dismissPlan = useCallback(() => chatStore.dismissPlan(), [])
   const setPlanProposal = useCallback(
@@ -59,7 +55,6 @@ export function useChat() {
     addUserMessage,
     handleEvent,
     clearAll,
-    restoreMessages,
     dismissApproval,
     dismissPlan,
     setPlanProposal,

@@ -1,5 +1,5 @@
 CATEGORY = "team"
-import json, uuid
+import uuid
 
 shutdown_reqs = {}
 plan_reqs = {}

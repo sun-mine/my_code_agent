@@ -1,7 +1,6 @@
 import { useState } from 'react'
-import { ShieldAlert, ChevronDown, ChevronUp, AlertTriangle, Terminal, FileText, Bot } from 'lucide-react'
+import { ChevronDown, ChevronUp, AlertTriangle, Terminal, FileText, Bot } from 'lucide-react'
 import type { ApprovalRequest } from '../../hooks/useChat'
-import { ICON_SM } from '../../lib/icons'
 
 interface ApprovalBannerProps {
   approval: ApprovalRequest

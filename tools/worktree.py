@@ -1,5 +1,4 @@
 CATEGORY = "worktree"
-import json
 from components.worktree_manager import WorktreeManager
 from components.event_bus import EventBus
 

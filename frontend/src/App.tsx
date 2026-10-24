@@ -901,7 +901,6 @@ export default function App() {
             }}
             preFill={preFillInput}
             onPreFillConsumed={() => setPreFillInput('')}
-            workdir={statusData?.workdir}
           />
         </main>
       </div>

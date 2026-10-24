@@ -10,19 +10,13 @@ TASK_TOOLS = [
      "input_schema": {"type": "object", "properties": {}}},
 ]
 
-def task_bind_worktree_handler(tmgr, **kw):
-    return tmgr.bind_worktree(kw["task_id"], kw.get("worktree", ""))
-
 def task_handlers_factory(tmgr):
     return {
         "task_create": lambda **kw: tmgr.create(kw["subject"], kw.get("description", "")),
         "task_get": lambda **kw: tmgr.get(kw["task_id"]),
         "task_update": lambda **kw: tmgr.update(kw["task_id"], kw.get("status"), kw.get("add_blocked_by"), kw.get("remove_blocked_by")),
         "task_list": lambda **kw: tmgr.list_all(),
-        "task_bind_worktree": task_bind_worktree_handler,
     }
-
-TASK_HANDLERS = task_handlers_factory  # 这个之后在 __init__.py 中会被调用
 
 def get_tools():
     return TASK_TOOLS

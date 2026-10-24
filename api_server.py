@@ -10,7 +10,6 @@ Web API 服务器 - ClaudeCode 风格前端的后端
 - routes/*：按领域分组的 Flask Blueprint
 - socket_handlers：Socket.IO 事件处理
 """
-import os
 import sys
 import threading
 from dataclasses import dataclass, field
@@ -48,7 +47,6 @@ team_manager = None
 bg_manager = None
 agent_config = None
 _run_thread = None
-_agent_lock = threading.Lock()   # 防止并发 run
 _is_running = False              # Agent 当前是否在运行
 _cfg = None                      # 缓存 config，用于动态重建 system prompt
 _skills = None                   # 缓存 skills，用于动态重建 system prompt
@@ -87,8 +85,7 @@ _current_mode: str = "auto"     # plan | auto | manual
 # 当本文件以 `python3 api_server.py` 直接运行时，模块名是 `__main__` 而非 `api_server`，
 # 子模块里的 `import api_server` 会找不到已加载的模块而重新加载本文件，触发循环导入。
 # 这里把 `api_server` 别名指向当前模块，确保子模块拿到同一份（全局状态已就绪的）模块对象。
-import sys as _sys
-_sys.modules.setdefault("api_server", _sys.modules[__name__])
+sys.modules.setdefault("api_server", sys.modules[__name__])
 
 # ====== 加载子模块（必须在全局状态定义之后，避免循环导入） ======
 from api import session_helpers  # noqa: E402
