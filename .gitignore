@@ -2,6 +2,7 @@
 .agent/
 .transcripts/
 .errors/
+hr/
 
 # Local configuration and environments
 .env
