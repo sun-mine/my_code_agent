@@ -1,0 +1,17 @@
+{
+  "version": "1",
+  "tasks": [
+    {
+      "id": "project-issue-001",
+      "repo_path": "/absolute/path/to/local/repository",
+      "base_sha": "0123456789abcdef0123456789abcdef01234567",
+      "issue": "Describe the observed bug, expected behavior, constraints, and reproduction here.",
+      "public_test_command": "python3 -m pytest -q tests/test_target.py",
+      "protected_paths": ["tests/test_target.py"],
+      "acceptance_script": "/absolute/path/outside/repository/acceptance",
+      "oracle_patch": "/absolute/path/outside/repository/oracle.patch",
+      "require_public_failure": true,
+      "timeout_seconds": 120
+    }
+  ]
+}

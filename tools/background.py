@@ -8,7 +8,12 @@ BG_TOOLS = [
 ]
 
 def bg_run_handler(bg, **kw):
-    return bg.run(kw["command"], kw.get("timeout", 120))
+    return bg.run(
+        kw["command"],
+        kw.get("timeout", 120),
+        cancellation_token=kw.get("_cancel_token"),
+        run_id=kw.get("_run_id"),
+    )
 
 def bg_check_handler(bg, **kw):
     return bg.check(kw.get("task_id"))

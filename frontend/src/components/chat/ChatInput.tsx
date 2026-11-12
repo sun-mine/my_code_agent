@@ -2,21 +2,27 @@ import { useState, useRef, useCallback, useEffect, type KeyboardEvent, type Clip
 import { Image, Paperclip, Plus, ChevronDown, ArrowUp, Square, X, Check, Eye, EyeOff } from 'lucide-react'
 import { api } from '../../lib/api'
 import type { AgentMode, FileContext, ImageAttachment, ModelInfo, SlashCommand } from '../../lib/types'
+import { chatDrafts, type PendingMessage } from '../../lib/chatStore'
 import './ChatInput.css'
 
 interface ChatInputProps {
   sessionId?: string
-  onSend: (text: string, attachments: { images: ImageAttachment[]; fileContexts: FileContext[] }) => void
+  onSend: (text: string, attachments: { images: ImageAttachment[]; fileContexts: FileContext[] }) => Promise<boolean>
   onInterrupt: () => void
+  onCancelPending: () => void
+  onRetryPending: () => void
   onClearHistory?: () => void
   onCompress?: () => void
   busy: boolean
+  stopping?: boolean
+  pendingMessage?: PendingMessage
   disabled?: boolean
   sendDisabled?: boolean
   mode: AgentMode
   onModeChange: (mode: AgentMode) => void
   currentModel: string
-  onModelChange: (modelId: string) => void
+  currentProvider: string
+  onModelChange: (modelId: string, provider: string) => void
   availableModels: ModelInfo[]
   fileContexts: FileContext[]
   onFileContextToggle: (path: string, included: boolean) => void
@@ -42,44 +48,68 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { trigger: '/compress', label: '压缩对话', description: '压缩对话以节省 Token' },
 ]
 
-const sessionDrafts = new Map<string, { draft: string; images: ImageAttachment[] }>()
-
 export function ChatInput({
-  sessionId, onSend, onInterrupt, onClearHistory, onCompress, busy, disabled, sendDisabled,
-  mode, onModeChange, currentModel, onModelChange, availableModels,
+  sessionId, onSend, onInterrupt, onCancelPending, onRetryPending,
+  onClearHistory, onCompress, busy, stopping, pendingMessage, disabled, sendDisabled,
+  mode, onModeChange, currentModel, currentProvider, onModelChange, availableModels,
   fileContexts, onFileContextToggle, onFileContextAdd, onFileContextRemove,
   preFill, onPreFillConsumed,
 }: ChatInputProps) {
-  const [draft, setDraft] = useState(() => sessionId ? sessionDrafts.get(sessionId)?.draft ?? '' : '')
-  const [images, setImages] = useState<ImageAttachment[]>(() => sessionId ? sessionDrafts.get(sessionId)?.images ?? [] : [])
+  const [draft, setDraft] = useState(() => sessionId ? chatDrafts.get(sessionId)?.draft ?? '' : '')
+  const [images, setImages] = useState<ImageAttachment[]>(() => sessionId ? chatDrafts.get(sessionId)?.images ?? [] : [])
   const [plusOpen, setPlusOpen] = useState(false)
   const [modelOpen, setModelOpen] = useState(false)
+  const [modelSwitching, setModelSwitching] = useState(false)
+  const [modelError, setModelError] = useState('')
   const [modeOpen, setModeOpen] = useState(false)
   const [focused, setFocused] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
   const [slashState, setSlashState] = useState<{ query: string; selIdx: number } | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const composingRef = useRef(false)
+  const submittingRef = useRef(false)
+  const pendingRef = useRef(!!pendingMessage)
+  const imageReadEpochRef = useRef(0)
 
   useEffect(() => {
-    if (sessionId) sessionDrafts.set(sessionId, { draft, images })
+    if (sessionId) chatDrafts.set(sessionId, draft, images)
   }, [sessionId, draft, images])
 
   useEffect(() => {
-    if (preFill) {
+    pendingRef.current = !!pendingMessage
+    if (pendingMessage) imageReadEpochRef.current += 1
+  }, [pendingMessage])
+
+  useEffect(() => {
+    if (!preFill) return
+    let cancelled = false
+    queueMicrotask(() => {
+      if (cancelled) return
       setDraft(preFill)
       onPreFillConsumed?.()
       textareaRef.current?.focus()
-    }
+    })
+    return () => { cancelled = true }
   }, [preFill, onPreFillConsumed])
 
-  const send = useCallback(() => {
+  const send = useCallback(async () => {
     const text = draft.trim()
-    if ((!text && images.length === 0) || busy || disabled || sendDisabled || composingRef.current) return
-    onSend(text, { images, fileContexts: fileContexts.filter(fc => fc.included) })
-    setDraft('')
-    setImages([])
-    if (textareaRef.current) textareaRef.current.style.height = 'auto'
-  }, [draft, images, fileContexts, busy, disabled, sendDisabled, onSend])
+    if ((!text && images.length === 0) || disabled || sendDisabled || pendingMessage || submittingRef.current || composingRef.current) return
+    imageReadEpochRef.current += 1
+    setPlusOpen(false)
+    submittingRef.current = true
+    setSubmitting(true)
+    try {
+      const accepted = await onSend(text, { images, fileContexts: fileContexts.filter(fc => fc.included) })
+      if (!accepted) return
+      setDraft('')
+      setImages([])
+      if (textareaRef.current) textareaRef.current.style.height = 'auto'
+    } finally {
+      submittingRef.current = false
+      setSubmitting(false)
+    }
+  }, [draft, images, fileContexts, disabled, sendDisabled, pendingMessage, onSend])
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.nativeEvent.isComposing || composingRef.current) return
@@ -141,7 +171,7 @@ export function ChatInput({
         handleFileUpload()
         return
       case '/model':
-        setModelOpen(true)
+        if (!busy && !disabled) setModelOpen(true)
         return
       case '/clear':
         onClearHistory?.()
@@ -173,8 +203,10 @@ export function ChatInput({
   }
 
   const handleImagePaste = useCallback((e: ClipboardEvent<HTMLTextAreaElement>) => {
+    if (submittingRef.current || pendingRef.current) return
     const items = e.clipboardData?.items
     if (!items) return
+    const epoch = imageReadEpochRef.current
     for (let i = 0; i < items.length; i++) {
       if (items[i].type.startsWith('image/')) {
         e.preventDefault()
@@ -182,6 +214,7 @@ export function ChatInput({
         if (!file) continue
         const reader = new FileReader()
         reader.onload = () => {
+          if (epoch !== imageReadEpochRef.current || submittingRef.current || pendingRef.current) return
           const dataUrl = reader.result as string
           setImages(prev => [...prev, {
             id: crypto.randomUUID(),
@@ -197,16 +230,20 @@ export function ChatInput({
   }, [])
 
   const handleImageUpload = () => {
+    if (submittingRef.current || pendingRef.current) return
     setPlusOpen(false)
+    const epoch = imageReadEpochRef.current
     const input = document.createElement('input')
     input.type = 'file'
     input.accept = 'image/*'
     input.multiple = true
     input.onchange = () => {
+      if (epoch !== imageReadEpochRef.current || submittingRef.current || pendingRef.current) return
       const files = Array.from(input.files || [])
       files.forEach(file => {
         const reader = new FileReader()
         reader.onload = () => {
+          if (epoch !== imageReadEpochRef.current || submittingRef.current || pendingRef.current) return
           const dataUrl = reader.result as string
           setImages(prev => [...prev, {
             id: crypto.randomUUID(),
@@ -241,20 +278,26 @@ export function ChatInput({
   }
 
   const removeImage = (id: string) => {
+    if (submittingRef.current || pendingRef.current) return
     setImages(prev => prev.filter(img => img.id !== id))
   }
 
-  const handleModelSelect = async (modelId: string) => {
-    setModelOpen(false)
+  const handleModelSelect = async (model: ModelInfo) => {
+    if (!model.configured || busy || disabled || modelSwitching) return
+    setModelError('')
+    setModelSwitching(true)
     try {
-      await api.setModel(modelId)
-      onModelChange(modelId)
-    } catch {
-      // ignore
+      const selected = await api.setModel(model.id, model.provider)
+      onModelChange(selected.model, selected.provider)
+      setModelOpen(false)
+    } catch (error) {
+      setModelError(error instanceof Error ? error.message : '切换模型失败，请重试')
+    } finally {
+      setModelSwitching(false)
     }
   }
 
-  const modelLabel = availableModels.find(m => m.id === currentModel)?.label || currentModel || '选择模型'
+  const modelLabel = availableModels.find(m => m.id === currentModel && m.provider === currentProvider)?.label || currentModel || '选择模型'
 
   return (
     <div className="chat-composer">
@@ -275,7 +318,7 @@ export function ChatInput({
             {images.map(img => (
               <div key={img.id} style={{ position: 'relative', width: 56, height: 56, flexShrink: 0 }}>
                 <img src={img.dataUrl} alt={img.fileName || '附加图片'} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8, border: '1px solid var(--border)' }} />
-                <button className="icon-button" aria-label={`移除图片 ${img.fileName || ''}`} onClick={() => removeImage(img.id)} style={{ position: 'absolute', top: -5, right: -5, width: 20, height: 20, borderRadius: '50%', background: 'var(--bg-overlay)', border: '1px solid var(--border-hi)' }}><X size={11} /></button>
+                <button className="icon-button" aria-label={`移除图片 ${img.fileName || ''}`} onClick={() => removeImage(img.id)} disabled={submitting || !!pendingMessage} style={{ position: 'absolute', top: -5, right: -5, width: 20, height: 20, borderRadius: '50%', background: 'var(--bg-overlay)', border: '1px solid var(--border-hi)' }}><X size={11} /></button>
               </div>
             ))}
           </div>
@@ -292,35 +335,45 @@ export function ChatInput({
           onCompositionStart={() => { composingRef.current = true }}
           onCompositionEnd={() => { composingRef.current = false }}
           rows={2}
-          disabled={disabled}
-          placeholder={busy ? '智能体正在处理中…' : disabled ? '连接本地服务后，即可开始对话…' : '描述你的想法，或输入 / 查看指令…'}
+          disabled={disabled || submitting || !!pendingMessage}
+          placeholder={busy ? '可输入下一条消息并加入队列…' : disabled ? '连接本地服务后，即可开始对话…' : '描述你的想法，或输入 / 查看指令…'}
         />
         <div className="composer-toolbar">
           <div className="composer-control">
-            <button className="composer-tool-button" onClick={() => setPlusOpen(open => !open)} title="添加内容" aria-label="添加内容" aria-expanded={plusOpen}><Plus size={18} /></button>
+            <button className="composer-tool-button" onClick={() => setPlusOpen(open => !open)} disabled={submitting || !!pendingMessage} title="添加内容" aria-label="添加内容" aria-expanded={plusOpen}><Plus size={18} /></button>
             {plusOpen && <>
               <div style={{ position: 'fixed', inset: 0, zIndex: 100 }} onClick={() => setPlusOpen(false)} />
               <div className="composer-menu composer-plus-menu">
-                <button className="composer-menu-item" onClick={handleImageUpload}><Image size={16} />添加图片</button>
+                <button className="composer-menu-item" onClick={handleImageUpload} disabled={submitting || !!pendingMessage}><Image size={16} />添加图片</button>
                 <button className="composer-menu-item" onClick={handleFileUpload}><Paperclip size={16} />添加文件</button>
               </div>
             </>}
           </div>
           <div className="composer-control">
-            <button className="composer-model-button" onClick={() => setModelOpen(open => !open)} title="切换模型" aria-label="切换模型" aria-expanded={modelOpen}>
-              <span>{modelLabel.replace('claude-', '').replace('deepseek-v4-', 'V4 ').replace('deepseek-', '')}</span><ChevronDown size={11} />
+            <button className="composer-model-button" onClick={() => setModelOpen(open => !open)} disabled={busy || disabled || modelSwitching} title={busy ? '任务进行中不可切换模型' : '切换模型'} aria-label="切换模型" aria-expanded={modelOpen}>
+              <span>{modelSwitching ? '切换中…' : modelLabel.replace('claude-', '').replace('deepseek-v4-', 'V4 ').replace('deepseek-', '')}</span><ChevronDown size={11} />
             </button>
             {modelOpen && <>
               <div style={{ position: 'fixed', inset: 0, zIndex: 100 }} onClick={() => setModelOpen(false)} />
               <div className="composer-menu composer-model-menu">
                 <p className="composer-menu-title">选择模型</p>
                 {availableModels.length === 0 && <p className="composer-menu-title">连接本地服务后查看可用模型</p>}
-                {availableModels.map(m => (
-                  <button className={`composer-menu-item${currentModel === m.id ? ' is-selected' : ''}`} key={m.id} onClick={() => handleModelSelect(m.id)}>
-                    {currentModel === m.id ? <Check size={12} color="var(--accent)" /> : <span className="composer-option-check" />}
-                    <span>{m.label}</span><span className="composer-provider">{m.provider}</span>
-                  </button>
-                ))}
+                {availableModels.map(m => {
+                  const selected = currentModel === m.id && currentProvider === m.provider
+                  return (
+                    <button
+                      className={`composer-menu-item${selected ? ' is-selected' : ''}${!m.configured ? ' is-unconfigured' : ''}`}
+                      key={`${m.provider}:${m.id}`}
+                      onClick={() => { void handleModelSelect(m) }}
+                      disabled={!m.configured || busy || disabled || modelSwitching}
+                      title={m.configured ? `${m.provider} · ${m.id}` : `${m.provider} 缺少配置`}
+                    >
+                      {selected ? <Check size={12} color="var(--accent)" /> : <span className="composer-option-check" />}
+                      <span>{m.label}</span>
+                      <span className="composer-provider">{m.provider}{!m.configured && <small>缺少配置</small>}</span>
+                    </button>
+                  )
+                })}
               </div>
             </>}
           </div>
@@ -342,12 +395,34 @@ export function ChatInput({
                 </div>
               </>}
             </div>
-            {busy
-              ? <button className="composer-stop" onClick={onInterrupt} title="停止生成"><Square size={10} fill="currentColor" />停止</button>
-              : <button className="composer-send" onClick={send} disabled={(!draft.trim() && images.length === 0) || disabled || sendDisabled} title="发送 (Enter)" aria-label="发送消息"><ArrowUp size={18} strokeWidth={2} /></button>}
+            {busy && (
+              <button className="composer-stop" onClick={onInterrupt} disabled={stopping} title={stopping ? '正在停止' : '停止生成'}>
+                <Square size={10} fill="currentColor" />{stopping ? '停止中…' : '停止'}
+              </button>
+            )}
+            <button
+              className="composer-send"
+              onClick={() => { void send() }}
+              disabled={(!draft.trim() && images.length === 0) || disabled || sendDisabled || submitting || !!pendingMessage}
+              title={busy ? '加入发送队列' : '发送 (Enter)'}
+              aria-label={busy ? '将消息加入发送队列' : '发送消息'}
+            ><ArrowUp size={18} strokeWidth={2} /></button>
           </div>
         </div>
       </div>
+      {modelError && (
+        <div className="composer-model-error" role="alert">
+          <span>模型切换失败：{modelError}</span>
+          <button onClick={() => setModelError('')} aria-label="关闭模型切换错误"><X size={12} /></button>
+        </div>
+      )}
+      {pendingMessage && (
+        <div className={`composer-queue${pendingMessage.status === 'failed' ? ' is-error' : ''}`} role={pendingMessage.status === 'failed' ? 'alert' : 'status'}>
+          <span>{pendingMessage.status === 'failed' ? `发送失败：${pendingMessage.error}` : pendingMessage.status === 'sending' ? '正在确认发送…' : '消息已排队，等待当前任务结束'}</span>
+          {pendingMessage.status === 'failed' && <button onClick={onRetryPending}>重试</button>}
+          {pendingMessage.status !== 'sending' && <button onClick={onCancelPending}>取消待发</button>}
+        </div>
+      )}
       {slashState && matchedCommands.length > 0 && <>
         <div style={{ position: 'fixed', inset: 0, zIndex: 100 }} onClick={() => setSlashState(null)} />
         <div className="composer-menu composer-slash-menu">
@@ -359,7 +434,7 @@ export function ChatInput({
         </div>
       </>}
       <div className="composer-footer">
-        <span className={`composer-connection${disabled ? ' is-offline' : ''}`}><i />{disabled ? '等待本地服务连接' : busy ? '正在处理你的任务' : '准备就绪，随时开始'}</span>
+        <span className={`composer-connection${disabled ? ' is-offline' : ''}`}><i />{disabled ? '等待本地服务连接' : stopping ? '正在安全停止任务' : busy ? '正在处理你的任务' : '准备就绪，随时开始'}</span>
         <span className="composer-keyboard-hint">Enter 发送 <span aria-hidden="true">·</span> Shift + Enter 换行</span>
       </div>
     </div>

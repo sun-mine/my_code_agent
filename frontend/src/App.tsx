@@ -1,16 +1,19 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo, type SetStateAction } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Trash2, Circle, AlertCircle, Plus, Minus, Pencil, Terminal, FolderOpen, ChevronRight, ChevronUp, Layers3, Code2, Search, ArrowUpRight, PanelLeft, X } from 'lucide-react'
 import './App.css'
 
 import { useAgentSocket, type SocketStatus } from './hooks/useAgentSocket'
 import { useChat, type FileChange } from './hooks/useChat'
-import { api } from './lib/api'
+import { chatDrafts, chatStore } from './lib/chatStore'
+import { api, ApiError } from './lib/api'
 import { historyToMessages } from './lib/history'
+import { buildConversation } from './lib/conversation'
 import { applyTheme } from './lib/theme'
 import type { AgentMode, FileContext, ModelInfo, ContentBlock, ImageAttachment, ChatMessage, AgentEvent, SessionSnapshot } from './lib/types'
 
 import { MessageBubble } from './components/chat/MessageBubble'
+import { DeliveryReport } from './components/chat/DeliveryReport'
 import { ChatInput } from './components/chat/ChatInput'
 import { ApprovalBanner } from './components/chat/ApprovalBanner'
 import { PlanReview } from './components/chat/PlanReview'
@@ -29,19 +32,34 @@ function FolderBrowser({ onSelect, onClose }: { onSelect: (path: string) => void
   const [items, setItems] = useState<Array<{ name: string; path: string }>>([])
   const [parent, setParent] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const loadEpochRef = useRef(0)
 
   const load = useCallback(async (path?: string) => {
+    const epoch = ++loadEpochRef.current
     setLoading(true)
     try {
       const data = await api.fsLs(path)
+      if (epoch !== loadEpochRef.current) return
       setBrowsePath(data.path)
       setParent(data.parent)
       setItems(data.items)
     } catch { /* ignore */ }
-    finally { setLoading(false) }
+    finally { if (epoch === loadEpochRef.current) setLoading(false) }
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    let cancelled = false
+    const epoch = ++loadEpochRef.current
+    void api.fsLs().then(data => {
+      if (cancelled || epoch !== loadEpochRef.current) return
+      setBrowsePath(data.path)
+      setParent(data.parent)
+      setItems(data.items)
+    }).catch(() => { /* The picker keeps its empty state on load failure. */ }).finally(() => {
+      if (!cancelled && epoch === loadEpochRef.current) setLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [])
 
   return (
     <>
@@ -274,7 +292,9 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [agentMode, setAgentMode] = useState<AgentMode>('auto')
   const [currentModel, setCurrentModel] = useState<string>('')
+  const [currentProvider, setCurrentProvider] = useState<string>('')
   const [availableModels, setAvailableModels] = useState<ModelInfo[]>([])
+  const modelLoadEpochRef = useRef(0)
   const [fileContexts, setFileContexts] = useState<FileContext[]>([])
   const bottomRef = useRef<HTMLDivElement>(null)
   const sidebarToggleRef = useRef<HTMLButtonElement>(null)
@@ -293,35 +313,43 @@ export default function App() {
 
   // Apply theme on mount
   useEffect(() => {
-    applyTheme((() => { try { const v = localStorage.getItem('code-agent-theme'); if (v === 'dark' || v === 'light') return v; if (v === 'beige') return 'light' } catch {} return 'dark' })())
+    applyTheme((() => { try { const v = localStorage.getItem('code-agent-theme'); if (v === 'dark' || v === 'light') return v; if (v === 'beige') return 'light' } catch { /* Storage can be unavailable in privacy mode. */ } return 'dark' })())
   }, [])
 
   const {
     activeSessionId, activateSession, hydrateSession,
-    messages, todos, toolCalls, agentState, runId,
+    messages, todos, toolCalls, agentState, runId, pendingMessage, canResume, draftResetEpoch, deliveryReports,
     pendingApprovals, changedFiles, planProposal, setPlanProposal,
     planOptions, setPlanOptions,
-    addUserMessage, handleEvent, clearAll, dismissApproval, dismissPlan,
+    handleEvent, clearAll, dismissApproval, dismissPlan,
   } = useChat()
   const activeSessionRef = useRef<string | null>(null)
   const selectionEpochRef = useRef(0)
   const [sessionSwitching, setSessionSwitching] = useState(true)
   const [sessionError, setSessionError] = useState('')
   const [runningSessionId, setRunningSessionId] = useState<string | null>(null)
+  const runningStateEpochRef = useRef(0)
+  const updateRunningSession = useCallback((update: SetStateAction<string | null>) => {
+    runningStateEpochRef.current += 1
+    setRunningSessionId(update)
+  }, [])
+  const [queueTick, setQueueTick] = useState(0)
+  const sendingRequestRef = useRef<string | null>(null)
 
   const applySessionSnapshot = useCallback((snapshot: SessionSnapshot, epoch: number) => {
     if (epoch !== selectionEpochRef.current) return false
     if (!snapshot.session_id || !Array.isArray(snapshot.events) || typeof snapshot.event_seq !== 'number') {
       throw new Error('后端仍是旧版本，请在主机重启 Python 后端服务后刷新页面。')
     }
-    hydrateSession(snapshot.session_id, historyToMessages(snapshot.history), snapshot)
+    hydrateSession(snapshot.session_id, historyToMessages(snapshot.history, snapshot.history_run_ids), snapshot)
     activeSessionRef.current = snapshot.session_id
     activateSession(snapshot.session_id)
     if (snapshot.mode) setAgentMode(snapshot.mode)
-    if (snapshot.running) setRunningSessionId(snapshot.session_id)
-    else setRunningSessionId(previous => previous === snapshot.session_id ? null : previous)
+    const effective = chatStore.getSessionState(snapshot.session_id)
+    if (effective?.runId) updateRunningSession(snapshot.session_id)
+    else updateRunningSession(previous => previous === snapshot.session_id ? null : previous)
     return true
-  }, [activateSession, hydrateSession])
+  }, [activateSession, hydrateSession, updateRunningSession])
 
   const restoreHistory = useCallback(async () => {
     const epoch = ++selectionEpochRef.current
@@ -329,15 +357,33 @@ export default function App() {
     setSessionSwitching(true)
     try {
       const snapshot = await api.history(selected ?? undefined)
-      if (applySessionSnapshot(snapshot, epoch)) setSessionError('')
+      if (applySessionSnapshot(snapshot, epoch)) {
+        setSessionError('')
+        return snapshot
+      }
     } catch (error) {
       if (epoch === selectionEpochRef.current) setSessionError(error instanceof Error ? error.message : '无法恢复聊天')
     } finally {
       if (epoch === selectionEpochRef.current) setSessionSwitching(false)
     }
+    return null
   }, [applySessionSnapshot])
 
-  useEffect(() => { void restoreHistory() }, [restoreHistory])
+  useEffect(() => {
+    let cancelled = false
+    const epoch = ++selectionEpochRef.current
+    const selected = activeSessionRef.current
+    void api.history(selected ?? undefined).then(snapshot => {
+      if (!cancelled && applySessionSnapshot(snapshot, epoch)) setSessionError('')
+    }).catch(error => {
+      if (!cancelled && epoch === selectionEpochRef.current) {
+        setSessionError(error instanceof Error ? error.message : '无法恢复聊天')
+      }
+    }).finally(() => {
+      if (!cancelled && epoch === selectionEpochRef.current) setSessionSwitching(false)
+    })
+    return () => { cancelled = true }
+  }, [applySessionSnapshot])
 
   // Merge consecutive messages with the same runId to avoid showing internal tool rounds
   const displayMessages = useMemo(() => {
@@ -362,20 +408,22 @@ export default function App() {
     return merged
   }, [messages])
 
+  const conversation = useMemo(() => buildConversation(displayMessages, deliveryReports), [displayMessages, deliveryReports])
+
   const onAgentEvent = useCallback((event: AgentEvent) => {
     handleEvent(event)
     if (!event.session_id) return
-    if (event.type === 'run_start') setRunningSessionId(event.session_id)
-    if (event.type === 'run_end' || (event.type === 'error' && !event.run_id)) {
-      setRunningSessionId(previous => previous === event.session_id ? null : previous)
+    if (event.type === 'run_start') updateRunningSession(event.session_id)
+    if (event.type === 'run_end' || event.type === 'interrupted' || (event.type === 'error' && !event.run_id)) {
+      updateRunningSession(previous => previous === event.session_id ? null : previous)
     }
-    if (event.type === 'run_start' || event.type === 'run_end' || event.type === 'error') {
+    if (event.type === 'run_start' || event.type === 'run_end' || event.type === 'interrupted' || event.type === 'error') {
       void qc.invalidateQueries({ queryKey: ['sessions'] })
       void qc.invalidateQueries({ queryKey: ['agentStatus'] })
     }
-  }, [handleEvent, qc])
+  }, [handleEvent, qc, updateRunningSession])
 
-  const { sendMessage } = useAgentSocket({
+  useAgentSocket({
     onEvent: onAgentEvent,
     onStatusChange: setSocketStatus,
     onReconnect: restoreHistory,
@@ -394,40 +442,42 @@ export default function App() {
   })
 
   useEffect(() => {
-    if (statusData && 'running_session_id' in statusData) {
-      setRunningSessionId(statusData.running_session_id ?? null)
-    }
-  }, [statusData])
+    if (!statusData || !('running_session_id' in statusData)) return
+    let cancelled = false
+    const epoch = runningStateEpochRef.current
+    const sessionId = statusData.running_session_id ?? null
+    queueMicrotask(() => {
+      if (!cancelled && epoch === runningStateEpochRef.current) updateRunningSession(sessionId)
+    })
+    return () => { cancelled = true }
+  }, [statusData, updateRunningSession])
 
-  // 检测工作目录是否有效
+  // 获取当前会话/工作区对应的模型列表与选择。
   useEffect(() => {
-    if (statusData?.workdir) {
-      setWorkdirError(false)
-    }
-  }, [statusData?.workdir])
-
-  // 初始化当前模型和可用模型列表
-  useEffect(() => {
-    if (statusData?.model && !currentModel) {
-      setCurrentModel(statusData.model)
-    }
-  }, [statusData?.model])
-
-  // 获取可用模型列表
-  useEffect(() => {
+    let cancelled = false
+    const epoch = ++modelLoadEpochRef.current
     api.listModels().then(data => {
+      if (cancelled || epoch !== modelLoadEpochRef.current) return
       setAvailableModels(data.models)
-      if (!currentModel && data.current) {
-        setCurrentModel(data.current)
-      }
-    }).catch(() => {})
-  }, [])  // eslint-disable-line react-hooks/exhaustive-deps
+      setCurrentModel(data.current)
+      setCurrentProvider(data.current_provider)
+    }).catch(() => { /* Model selection remains available from status data. */ })
+    return () => { cancelled = true }
+  }, [activeSessionId, statusData?.workdir])
+
+  const handleModelChange = useCallback((model: string, provider: string) => {
+    // Ignore any older list request that may still be resolving while the switch completes.
+    modelLoadEpochRef.current += 1
+    setCurrentModel(model)
+    setCurrentProvider(provider)
+    void qc.invalidateQueries({ queryKey: ['agentStatus'] })
+  }, [qc])
 
   const busy = agentState !== 'idle' || (!!activeSessionId && runningSessionId === activeSessionId)
   const backgroundRunning = !!runningSessionId && runningSessionId !== activeSessionId
 
-  const handleSend = (text: string, attachments?: { images: ImageAttachment[]; fileContexts: FileContext[] }) => {
-    if (!activeSessionId || sessionSwitching || backgroundRunning || busy) return
+  const handleSend = (text: string, attachments?: { images: ImageAttachment[]; fileContexts: FileContext[] }): Promise<boolean> => {
+    if (!activeSessionId || sessionSwitching) return Promise.resolve(false)
     const images = attachments?.images ?? []
     const fctxs = attachments?.fileContexts ?? fileContexts.filter(fc => fc.included)
     // Build message content blocks
@@ -445,11 +495,51 @@ export default function App() {
     const content: string | ContentBlock[] = blocks.length === 1 && blocks[0].type === 'text'
       ? blocks[0].text
       : blocks
-    if (!sendMessage(content, agentMode, activeSessionId)) return
-    addUserMessage(content)
-    setRunningSessionId(activeSessionId)
-    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
+    return chatStore.enqueueMessage(activeSessionId, content, agentMode)
   }
+
+  useEffect(() => {
+    const next = chatStore.getNextPendingMessage()
+    if (!next || runningSessionId || agentState !== 'idle' || socketStatus !== 'connected' ||
+        sendingRequestRef.current) return
+
+    const { sessionId, message } = next
+    const requestId = message.requestId
+    sendingRequestRef.current = requestId
+    chatStore.updatePendingMessage(sessionId, requestId, 'sending')
+    void api.chat(message.content, message.mode, sessionId, requestId)
+      .then(accepted => {
+        if (accepted.session_id !== sessionId) {
+          throw new Error('服务器返回了不匹配的会话，消息仍保留在待发队列')
+        }
+        sendingRequestRef.current = null
+        chatDrafts.clear(sessionId)
+        const running = chatStore.acceptPendingMessage(sessionId, requestId, accepted.run_id)
+        updateRunningSession(previous => running ? accepted.session_id : previous === sessionId ? null : previous)
+        setQueueTick(tick => tick + 1)
+        setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
+      })
+      .catch(error => {
+        if (error instanceof ApiError && error.status === 409) {
+          chatStore.updatePendingMessage(sessionId, requestId, 'queued')
+          sendingRequestRef.current = null
+          void refetchStatus()
+          window.setTimeout(() => setQueueTick(tick => tick + 1), 1000)
+          return
+        }
+        sendingRequestRef.current = null
+        chatStore.updatePendingMessage(
+          sessionId,
+          requestId,
+          'failed',
+          error instanceof Error ? error.message : '无法确认服务器已接收，请重试',
+        )
+        setQueueTick(tick => tick + 1)
+      })
+  }, [
+    activeSessionId, pendingMessage, runningSessionId, agentState, socketStatus, queueTick,
+    refetchStatus, updateRunningSession,
+  ])
 
   const handleCompress = () => {
     handleSend('__compress__')
@@ -467,12 +557,30 @@ export default function App() {
     setSelectedFile(null)
   }, [])
 
+  const handleResumeReview = useCallback(async (sessionId: string, reportRunId: string) => {
+    const report = await api.resumeReview(sessionId, reportRunId)
+    if (!chatStore.replaceDeliveryReport(sessionId, reportRunId, report)) {
+      throw new Error('返回的审查报告不属于原会话或运行')
+    }
+  }, [])
+
   const handleInterrupt = async () => {
     const sessionId = activeSessionRef.current
-    if (!sessionId) return
+    if (!sessionId || agentState === 'cancelling') return
+    let targetRunId = runId
+    if (!targetRunId) {
+      const snapshot = await restoreHistory()
+      targetRunId = snapshot?.session_id === sessionId && snapshot.running ? snapshot.run_id : null
+    }
+    if (!targetRunId) {
+      setSessionError('当前没有可停止的任务')
+      return
+    }
+    chatStore.setStopping(sessionId, true)
     try {
-      await api.interrupt(sessionId, runId ?? undefined)
+      await api.interrupt(sessionId, targetRunId)
     } catch (error) {
+      chatStore.setStopping(sessionId, false)
       setSessionError(error instanceof Error ? error.message : '停止失败，请重试')
     }
   }
@@ -528,7 +636,8 @@ export default function App() {
     }
   }
 
-  const handleWorkdirChanged = () => {
+  const handleWorkdirChanged = useCallback(() => {
+    setWorkdirError(false)
     void refetchStatus()
     void qc.invalidateQueries({ queryKey: ['fileTree'] })
     const epoch = ++selectionEpochRef.current
@@ -543,7 +652,7 @@ export default function App() {
     }).finally(() => {
       if (epoch === selectionEpochRef.current) setSessionSwitching(false)
     })
-  }
+  }, [applySessionSnapshot, qc, refetchStatus])
 
   const handleApprove = async (toolUseId: string, approved: boolean) => {
     const approval = pendingApprovals.find(item => item.id === toolUseId)
@@ -556,10 +665,11 @@ export default function App() {
   }
 
   const handlePlanApprove = async (_planRunId: string) => {
+    void _planRunId
     const planContent = planProposal?.content || ''
     setPlanProposal(prev => prev ? { ...prev, status: 'approved' } : null)
     if (planContent) {
-      api.savePlan(planContent, 'plan').catch(() => {})
+      api.savePlan(planContent, 'plan').catch(() => { /* Plan execution can continue without a saved copy. */ })
     }
     dismissPlan()
     setAgentMode('auto')
@@ -570,6 +680,7 @@ export default function App() {
   }
 
   const handlePlanReject = async (_planRunId: string) => {
+    void _planRunId
     setPlanProposal(prev => prev ? { ...prev, status: 'rejected' } : null)
     dismissPlan()
     const rejectMsg = '请重新规划，考虑不同的方案'
@@ -578,6 +689,7 @@ export default function App() {
   }
 
   const handlePlanModify = async (_planRunId: string, feedback: string) => {
+    void _planRunId
     dismissPlan()
     const modifyMsg = `请根据以下反馈修改计划：\n${feedback}`
     handleSend(modifyMsg)
@@ -604,12 +716,12 @@ export default function App() {
         }
       }
     }
-  }, [])
+  }, [handleWorkdirChanged])
 
   useEffect(() => {
     const el = bottomRef.current?.parentElement
-    if (el) el.scrollTop = el.scrollHeight
-  }, [messages, toolCalls, pendingApprovals])
+    if (el) el.scrollTo({ top: el.scrollHeight })
+  }, [messages, toolCalls, pendingApprovals, deliveryReports])
 
   // 计算相对路径
   const relativePath = (fullPath: string) => {
@@ -772,8 +884,8 @@ export default function App() {
         {/* ─── Chat area ─────────────────────────────── */}
         <main className="chat-workspace">
           {/* Messages scroll area */}
-          <div className={`conversation-scroll${messages.length === 0 ? ' is-empty' : ''}`}>
-            {messages.length === 0 && (
+          <div className={`conversation-scroll${messages.length === 0 && deliveryReports.length === 0 ? ' is-empty' : ''}`}>
+            {messages.length === 0 && deliveryReports.length === 0 && (
               <section className="welcome-screen" aria-labelledby="welcome-title">
                 <div className="welcome-eyebrow"><span /> 你的本地 AI 工作台</div>
                 <h1 id="welcome-title">让想法，<span>成为代码。</span></h1>
@@ -814,9 +926,9 @@ export default function App() {
             )}
 
             <div className="conversation-messages">
-              {displayMessages.map(msg => (
-                <MessageBubble key={msg.id} msg={msg} />
-              ))}
+              {conversation.map(item => item.type === 'message'
+                ? <MessageBubble key={`message-${item.message.id}`} msg={item.message} />
+                : <DeliveryReport key={`report-${item.report.run_id}`} report={item.report} onResumeReview={handleResumeReview} />)}
             </div>
 
             {/* Tool calls are now shown inline in MessageBubble */}
@@ -843,10 +955,7 @@ export default function App() {
                 options={planOptions}
                 onSelect={(optionId) => {
                   setPlanOptions(null)
-                  if (activeSessionId && sendMessage(`选择: ${optionId}`, 'plan', activeSessionId)) {
-                    addUserMessage(`选择: ${optionId}`)
-                    setRunningSessionId(activeSessionId)
-                  }
+                  void handleSend(`选择: ${optionId}`)
                 }}
               />
             </div>
@@ -867,21 +976,33 @@ export default function App() {
 
           {sessionError && <div className="session-notice is-error" role="alert"><AlertCircle size={14} /><span>{sessionError}</span><button aria-label="关闭聊天提示" onClick={() => setSessionError('')}><X size={14} /></button></div>}
           {backgroundRunning && <div className="session-notice" role="status"><Circle size={6} fill="currentColor" /><span>上一段对话仍在生成，你可以先写下新的想法。</span><button onClick={() => { if (runningSessionId) void handleLoadSession(runningSessionId) }}>返回并查看</button></div>}
+          {canResume && !busy && <div className="session-notice" role="status"><Circle size={6} fill="currentColor" /><span>任务已中断，上下文仍保留。</span><button onClick={() => { void handleSend('请继续执行刚才被中断的任务。') }}>继续执行</button></div>}
           {/* Input */}
           <ChatInput
-            key={activeSessionId ?? 'connecting'}
+            key={`${activeSessionId ?? 'connecting'}:${draftResetEpoch}`}
             sessionId={activeSessionId ?? undefined}
             onSend={handleSend}
             onInterrupt={handleInterrupt}
+            onCancelPending={() => {
+              if (activeSessionId && pendingMessage) chatStore.cancelPendingMessage(activeSessionId, pendingMessage.requestId)
+            }}
+            onRetryPending={() => {
+              if (!activeSessionId || !pendingMessage) return
+              chatStore.updatePendingMessage(activeSessionId, pendingMessage.requestId, 'queued')
+              setQueueTick(tick => tick + 1)
+            }}
             onClearHistory={handleClearHistory}
             onCompress={handleCompress}
             busy={busy}
+            stopping={agentState === 'cancelling'}
+            pendingMessage={pendingMessage ?? undefined}
             disabled={socketStatus !== 'connected'}
-            sendDisabled={sessionSwitching || backgroundRunning || !activeSessionId}
+            sendDisabled={sessionSwitching || !activeSessionId}
             mode={agentMode}
             onModeChange={setAgentMode}
             currentModel={currentModel}
-            onModelChange={setCurrentModel}
+            currentProvider={currentProvider}
+            onModelChange={handleModelChange}
             availableModels={availableModels}
             fileContexts={fileContexts}
             onFileContextToggle={(path, included) => {
@@ -927,7 +1048,7 @@ export default function App() {
       />
 
       {/* ─── File editor modal ──────────────────────── */}
-      <FilePreview path={selectedFile} onClose={() => setSelectedFile(null)} onAddToChat={handleAddToChat} />
+      <FilePreview key={selectedFile ?? 'closed'} path={selectedFile} onClose={() => setSelectedFile(null)} onAddToChat={handleAddToChat} />
     </div>
   )
 }

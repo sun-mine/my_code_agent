@@ -1,38 +1,105 @@
-import subprocess
 import threading
 import uuid
-from queue import Queue
 from pathlib import Path
+from queue import Empty, Queue
+
+from components.command_runner import CancellationToken, command_error, run_command
+
 
 class BackgroundManager:
     def __init__(self, workdir: Path = None):
-        self.workdir = workdir or Path.cwd()
+        self.workdir = Path(workdir or Path.cwd()).resolve()
         self.tasks = {}
         self.notifications = Queue()
+        self._lock = threading.Lock()
 
-    def run(self, command: str, timeout: int = 120) -> str:
+    def run(
+        self,
+        command: str,
+        timeout: int = 120,
+        cancellation_token: CancellationToken = None,
+        run_id: str = None,
+    ) -> str:
         tid = str(uuid.uuid4())[:8]
-        self.tasks[tid] = {"status": "running", "command": command, "result": None}
-        threading.Thread(target=self._exec, args=(tid, command, timeout), daemon=True).start()
+        token = cancellation_token.child() if cancellation_token else CancellationToken()
+        task = {
+            "status": "running", "command": command, "result": None,
+            "run_id": run_id, "token": token,
+        }
+        thread = threading.Thread(
+            target=self._exec,
+            args=(tid, command, timeout, token, run_id),
+            daemon=True,
+        )
+        task["thread"] = thread
+        with self._lock:
+            self.tasks[tid] = task
+        thread.start()
         return f"Background task {tid} started: {command[:80]}"
 
-    def _exec(self, tid: str, command: str, timeout: int):
+    def _exec(self, tid, command, timeout, token, run_id):
         try:
-            r = subprocess.run(command, shell=True, cwd=self.workdir, capture_output=True, text=True, timeout=timeout)
-            out = (r.stdout + r.stderr).strip()[:50000]
-            self.tasks[tid].update({"status": "completed", "result": out or "(no output)"})
-        except Exception as e:
-            self.tasks[tid].update({"status": "error", "result": str(e)})
-        self.notifications.put({"task_id": tid, "status": self.tasks[tid]["status"], "result": self.tasks[tid]["result"][:500]})
+            result = run_command(
+                command, cwd=self.workdir, timeout=timeout,
+                cancellation_token=token,
+            )
+        except Exception as exc:
+            result = command_error(f"Error: {exc}")
+        finally:
+            token.close()
+
+        if getattr(result, "cancelled", False):
+            status = "cancelled"
+        elif getattr(result, "timed_out", False):
+            status = "timed_out"
+        elif result.is_error:
+            status = "error"
+        else:
+            status = "completed"
+        with self._lock:
+            self.tasks[tid].update({"status": status, "result": result})
+        self.notifications.put({
+            "task_id": tid, "run_id": run_id, "status": status,
+            "result": result.model_content(), **result.event_fields(),
+        })
+
+    def cancel(self, tid: str = None) -> str:
+        with self._lock:
+            tasks = [(tid, self.tasks.get(tid))] if tid else list(self.tasks.items())
+            targets = [
+                (task_id, task) for task_id, task in tasks
+                if task and task["status"] in {"running", "cancelling"}
+            ]
+            for _, task in targets:
+                task["status"] = "cancelling"
+        if tid and not tasks[0][1]:
+            return f"Unknown: {tid}"
+        for _, task in targets:
+            task["token"].cancel()
+        for _, task in targets:
+            task["thread"].join(timeout=5)
+        return f"Cancelled {len(targets)} background task(s)"
 
     def check(self, tid: str = None) -> str:
-        if tid:
-            t = self.tasks.get(tid)
-            return f"[{t['status']}] {t.get('result') or '(running)'}" if t else f"Unknown: {tid}"
-        return "\n".join(f"{k}: [{v['status']}] {v['command'][:60]}" for k, v in self.tasks.items()) or "No bg tasks"
+        with self._lock:
+            if tid:
+                task = self.tasks.get(tid)
+                if not task:
+                    return f"Unknown: {tid}"
+                return f"[{task['status']}] {task.get('result') or '(running)'}"
+            snapshot = list(self.tasks.items())
+        return "\n".join(
+            f"{task_id}: [{task['status']}] {task['command'][:60]}"
+            for task_id, task in snapshot
+        ) or "No bg tasks"
 
-    def drain(self) -> list:
-        notifs = []
-        while not self.notifications.empty():
-            notifs.append(self.notifications.get_nowait())
-        return notifs
+    def drain(self, run_id: str = None) -> list:
+        matched = []
+        while True:
+            try:
+                notification = self.notifications.get_nowait()
+            except Empty:
+                break
+            if notification.get("run_id") == run_id:
+                matched.append(notification)
+        return matched

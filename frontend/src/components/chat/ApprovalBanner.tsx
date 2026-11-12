@@ -16,14 +16,15 @@ function getToolLabel(name: string): string {
   return labels[name] || name
 }
 
-function getToolIcon(name: string) {
+function renderToolIcon(name: string, color: string) {
+  const props = { size: 16, color }
   switch (name) {
-    case 'bash': return Terminal
-    case 'background_run': return Terminal
-    case 'write_file': return FileText
-    case 'edit_file': return FileText
-    case 'task': return Bot
-    default: return AlertTriangle
+    case 'bash': return <Terminal {...props} />
+    case 'background_run': return <Terminal {...props} />
+    case 'write_file': return <FileText {...props} />
+    case 'edit_file': return <FileText {...props} />
+    case 'task': return <Bot {...props} />
+    default: return <AlertTriangle {...props} />
   }
 }
 
@@ -40,7 +41,6 @@ function getRiskLevel(name: string, input: Record<string, unknown>): { level: st
 
 export function ApprovalBanner({ approval, onApprove }: ApprovalBannerProps) {
   const [expanded, setExpanded] = useState(true)
-  const ToolIcon = getToolIcon(approval.name)
   const risk = getRiskLevel(approval.name, approval.input)
 
   const summary = (() => {
@@ -73,7 +73,7 @@ export function ApprovalBanner({ approval, onApprove }: ApprovalBannerProps) {
           background: `${risk.color}20`, border: `1px solid ${risk.color}40`,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
-          <ToolIcon size={16} color={risk.color} />
+          {renderToolIcon(approval.name, risk.color)}
         </div>
 
         <div style={{ flex: 1, minWidth: 0 }}>

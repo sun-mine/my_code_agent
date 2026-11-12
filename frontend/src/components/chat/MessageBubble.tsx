@@ -1,7 +1,7 @@
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Shrink, Brain, Loader2, FileText, Pencil, Terminal, Search, FolderOpen, ListTree, MemoryStick, Wrench } from 'lucide-react'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import type { ChatMessage, ContentBlock, AssistantStep } from '../../lib/types'
 import type { ToolCall } from '../../hooks/useChat'
 import { stripAnsi } from '../../lib/utils'
@@ -101,9 +101,9 @@ function getToolDescriptor(name: string, input: Record<string, unknown>): { icon
   }
 }
 
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${Math.round(ms)}ms`
-  return `${(ms / 1000).toFixed(1)}s`
+function formatDuration(seconds: number): string {
+  if (seconds < 1) return `${Math.round(seconds * 1000)}ms`
+  return `${seconds.toFixed(1)}s`
 }
 
 // ── Inline tool call line ──────────────────────────────
@@ -111,8 +111,9 @@ function formatDuration(ms: number): string {
 function ToolLine({ tc }: { tc: ToolCall }) {
   const [expanded, setExpanded] = useState(false)
   const { icon, action, detail } = getToolDescriptor(tc.name, tc.input)
-  const dur = (tc.ts_end && tc.ts_start) ? tc.ts_end - tc.ts_start : null
+  const dur = tc.duration ?? (tc.ts_end !== undefined ? tc.ts_end - tc.ts_start : null)
   const isRunning = tc.status === 'running'
+  const resultLabel = tc.status === 'error' ? '失败' : tc.status === 'cancelled' ? '已取消' : null
 
   return (
     <div style={{ marginTop: 5 }}>
@@ -121,7 +122,7 @@ function ToolLine({ tc }: { tc: ToolCall }) {
         style={{
           display: 'flex', alignItems: 'center', gap: 6,
           width: '100%', padding: '4px 8px', borderRadius: 6,
-          background: isRunning ? 'var(--accent-soft)' : 'var(--bg-base)',
+          background: isRunning ? 'var(--accent-soft)' : tc.status === 'error' ? 'rgba(239,68,68,0.08)' : 'var(--bg-base)',
           border: '1px solid var(--border)',
           cursor: 'pointer', textAlign: 'left',
           fontSize: 12, color: 'var(--text-2)',
@@ -149,13 +150,16 @@ function ToolLine({ tc }: { tc: ToolCall }) {
         {isRunning && (
           <span style={{ color: 'var(--accent)', fontSize: 10, flexShrink: 0, animation: 'pulse 1s ease-in-out infinite' }}>执行中</span>
         )}
+        {resultLabel && (
+          <span style={{ color: tc.status === 'error' ? 'var(--red)' : 'var(--text-3)', fontSize: 10, flexShrink: 0 }}>{resultLabel}</span>
+        )}
       </button>
-      {expanded && tc.status === 'done' && tc.output && (
+      {expanded && !isRunning && tc.output && (
         <pre style={{
           margin: '4px 0 0', padding: '6px 10px', borderRadius: 6,
           background: 'var(--bg-base)', border: '1px solid var(--border)',
           fontSize: 11, fontFamily: 'var(--font-mono)',
-          color: tc.output.startsWith('Error:') ? 'var(--red)' : 'var(--text-2)',
+          color: tc.status === 'error' ? 'var(--red)' : 'var(--text-2)',
           whiteSpace: 'pre-wrap', wordBreak: 'break-all',
           maxHeight: 160, overflow: 'auto',
         }}>
@@ -171,16 +175,18 @@ function ToolLine({ tc }: { tc: ToolCall }) {
 function ThinkingBlock({ text, streaming }: { text: string; streaming?: boolean }) {
   const [open, setOpen] = useState(!!streaming)
   const [elapsed, setElapsed] = useState(0)
-  const startRef = useRef(Date.now())
 
   useEffect(() => {
     if (streaming) {
-      startRef.current = Date.now()
-      setElapsed(0)
+      const startedAt = Date.now()
+      const resetTimer = window.setTimeout(() => setElapsed(0), 0)
       const timer = setInterval(() => {
-        setElapsed(Math.floor((Date.now() - startRef.current) / 1000))
+        setElapsed(Math.floor((Date.now() - startedAt) / 1000))
       }, 200)
-      return () => clearInterval(timer)
+      return () => {
+        window.clearTimeout(resetTimer)
+        clearInterval(timer)
+      }
     }
   }, [streaming])
 

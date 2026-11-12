@@ -1,8 +1,8 @@
 # Code Agent
 
 <p align="center">
-  <strong>本地运行的 AI 编程工作台</strong><br />
-  选择你的代码目录，用自然语言理解、搜索和修改项目。
+  <strong>测试驱动、交付可复验的 AI 编程工作台</strong><br />
+  定位代码 → 修改 → 执行验证 → 根据失败反馈修复 → 审阅真实 diff 与执行记录。
 </p>
 <p align="center">
   <a href="https://github.com/sun-mine/my_code_agent"><img alt="GitHub repository" src="https://img.shields.io/badge/GitHub-my__code__agent-181717?style=flat-square&logo=github"></a>
@@ -17,7 +17,48 @@
 </p>
 
 
-Code Agent 将对话、项目目录和代码工具放在同一个界面中。项目目录由你明确选择；之后可以在项目下创建多个对话，让智能体围绕当前项目读取代码、解释结构、搜索内容或执行修改。
+Code Agent 面向本地代码仓库的理解与修复。保留一个自研工具调用循环，以独立的代码定位工具、交付报告和评测脚本验证工程设计的价值。
+
+## 核心能力与验证
+
+| 能力 | 实现 | 可检查的证据 |
+| --- | --- | --- |
+| Python 代码定位 | AST 提取定义与 import，文本匹配引用候选，返回文件与行号 | `lookup_symbol` 工具结果；引用候选不等于调用图 |
+| 测试驱动修复 | 显式配置验证命令，失败后最多两轮修复；统一限制模型轮数、工具次数、耗时与 Token | 实际命令退出码、修复轮数及预算终态 |
+| 可复核交付 | 捕获运行前 Git 基线，运行后生成文件清单、diff 和命令记录 | 每个项目的 `.agent/runs/<run_id>/report.json` 与 `events.jsonl` |
+| 可靠会话执行 | 请求幂等、运行归属、进程级取消、重连后快照恢复 | 后端与前端回归测试 |
+| 可复现评测 | 固定题集、开发/留出划分、同模型同预算比较 | [评测说明](evals/README.md)及逐题原始结果 |
+
+**评测结果边界：** 软件测试与离线回放验证执行和评分链路；真实模型任务完成率需要单独实测。自建题集不代表 SWE-bench 成绩，也不宣称通用领先。
+
+已有[本地免费模型的小样本对照与失败分析](evals/results/free-local-smoke/comparison.md)。该样本尚未证明检索或修复策略能提升任务完成率，真实仓库成绩仍待测。
+
+无需模型即可复现评分链路：
+
+```bash
+python3 -m evals.runner --split all --run-name offline-demo --output evals/results/offline-demo
+```
+
+题集包含 20 个自建 Python 修复小题，固定为 12 个开发题与 8 个留出题。离线演示回放预置补丁，输出逐题 JSONL 和汇总 Markdown，不计为 Agent 成功率。[真实本地 Git 仓库任务接入](evals/repo_manifest.example.json)支持固定 base commit、问题描述、公开验证命令和外部验收脚本；模型完成率在显式 `--live` 运行后才产生。
+
+## 修复工作流
+
+默认仍支持普通代码对话。需要自动验证时，在启动后端前为所选项目显式设置命令：
+
+```bash
+export AGENT_VERIFY_COMMAND='python3 -m pytest -q'
+./start.sh
+```
+
+在 Auto 模式下，模型结束一轮修复后，控制器执行该命令；失败日志返回给 Agent，最多进行两轮后续修复。Manual 模式仍需审批命令，Plan 模式不执行验证。验证命令应适用于当前选中的工作目录；切换项目时需要相应调整配置并重启后端。
+
+聊天中的交付报告可展开真实 diff 与命令日志、复制摘要或下载 JSON。报告区分运行结束、失败、中断和不完整；命令退出码为 0 只证明该命令执行成功，不代表需求已经验收。未运行验证、非 Git 项目、证据缺失和截断均明确标注。报告以运行前工作区为基线，保留用户原有未提交改动。
+
+[查看交付报告样例与 60–90 秒演示步骤](docs/demo/README.md)。样例明确标记为离线回放，包含首次测试失败、代码修改、再次测试通过的真实执行证据。
+
+运行预算可由 `AGENT_MAX_ROUNDS`（40）、`AGENT_MAX_TOOL_CALLS`（100）、`AGENT_MAX_SECONDS`（600）、`AGENT_MAX_TOKENS`（100000）、`AGENT_MAX_REPAIR_ATTEMPTS`（2）调整。Token 依据主循环模型响应的实际 usage 累计；不含未报告的提供方消耗。耗时上限会停止后续工具执行，并取消已登记的命令与流；SDK 建立或关闭连接时仍可能超过设定耗时，不提供硬实时保证。
+
+文件与命令在所选工作区内执行。Git worktree 仅隔离代码改动，当前不提供命令安全沙箱；未实现的沙箱入口明确返回错误。
 
 ## 技术栈
 
@@ -128,7 +169,7 @@ cd frontend
 npm run dev
 ```
 
-开发模式下，Vite 会将 `/api` 请求代理到 `localhost:8000`；Socket.IO 直接连接后端。
+开发模式下，Vite 将 `/api` 和 `/socket.io` 同源代理到后端。端口由根 `.env` 的 `API_PORT`、`FRONTEND_PORT` 统一配置；分机开发可设置 `API_PROXY_TARGET`。
 
 ## 选择项目并开始对话
 
@@ -142,25 +183,80 @@ npm run dev
 
 ## 模型配置
 
-后端读取以下环境变量，也可以在仓库根目录创建 `.env` 文件设置：
+在根目录使用 [`.env.example`](.env.example) 创建 `.env`，按需填写。配置优先级为 **进程环境变量 > 根 `.env` > 代码默认值**，CLI、Web 与独立审查进程使用相同规则。默认选择本地 Ollama。
 
-| 变量 | 默认值 | 用途 |
-| --- | --- | --- |
-| `AGENT_WORKDIR` | 启动时的当前目录 | 后端初始工作目录 |
-| `ANTHROPIC_BASE_URL` | `http://127.0.0.1:11434` | 模型服务地址 |
-| `ANTHROPIC_AUTH_TOKEN` | `ollama` | 模型服务 API Key |
-| `MODEL_ID` | `qwen2.5:3b` | 模型名称 |
-| `TOKEN_THRESHOLD` | `100000` | 自动压缩上下文的 token 阈值 |
-
-例如，使用 Anthropic API 时可配置：
+模型按供应商分组保存地址、密钥、型号、认证方式和可选型号列表。选择 DeepSeek：
 
 ```dotenv
-ANTHROPIC_BASE_URL=https://api.anthropic.com
-ANTHROPIC_AUTH_TOKEN=your-api-key
-MODEL_ID=claude-sonnet-4-20250514
+LLM_PROVIDER=deepseek
+DEEPSEEK_API_KEY=填写你的DeepSeek开放平台密钥
 ```
 
-请勿将包含真实密钥的 `.env` 提交到版本库。模型也可以在界面中切换（取决于后端服务提供的模型列表）。
+选择 Kimi 则设置 `LLM_PROVIDER=kimi` 并填写 `KIMI_API_KEY`。修改后重启后端或 CLI；其他供应商的密钥可以留空。当前支持 Anthropic Messages 兼容接口，不能直接填 OpenAI 格式端点。网页下拉框汇总所有供应商已配置的型号，可直接跨供应商切换；缺少配置的项会禁用，任务执行期间不能切换。
+
+`.env` 已被 Git 忽略，模板不包含真实密钥。旧三变量仍可在 `LLM_PROVIDER` 留空时使用。完整变量清单、认证说明、服务端口、运行预算、GitHub/A2A 配置及保留在代码中的内容，见 [配置说明](docs/configuration.md)。
+
+## GitHub MCP（可选，只读）
+
+让 Agent 读取 GitHub Issue、PR 和仓库文件，再用原有本地工具修改代码、运行测试。在**实际启动后端的主机和 Python 环境**中安装（Python 3.10+，固定 MCP SDK 2.3.0）：
+
+```bash
+python -m pip install -r requirements-mcp.txt
+export GITHUB_MCP_TOKEN='你的 GitHub PAT'
+export GITHUB_MCP_TIMEOUT=20
+./start.sh
+```
+
+PAT 只需授予目标仓库的必要读取权限；也可在本机 `.env` 配置上述变量，不要提交令牌。没有配置 `GITHUB_MCP_TOKEN` 时，集成保持禁用，基础后端无需安装 MCP 依赖。
+
+第一版连接 GitHub 官方远程只读服务，动态发现并最多加载四个工具：
+
+| 工具 | 用途 |
+| --- | --- |
+| `github__issue_read` | 读取 Issue 正文、评论等上下文 |
+| `github__pull_request_read` | 读取 PR 信息、diff、检查等上下文 |
+| `github__search_issues` | 按条件搜索 Issue |
+| `github__get_file_contents` | 读取远程仓库文件 |
+
+例如发送“修复 https://github.com/owner/repo/issues/123 描述的问题”。本轮首次模型请求前会读取当前消息中的 Issue/PR 链接，去重后最多两个；旧历史链接不会被自动重复读取。读取的是问题或 PR 本身，后续评论等由模型按需调用。Plan 模式也可读取这些数据。
+
+调用进入现有工具事件和 `.agent/runs/<run_id>/events.jsonl`，保留错误、耗时、超时、中断及截断标记；外部内容按数据处理。`GET /api/status` 的 `github_mcp` 字段显示 `disabled`、`ready` 或 `unavailable`，不会返回令牌。`ready` 表示启动时工具发现成功，实际调用结果以工具事件为准。首次连接失败会明确显示不可用，不影响本地代码工具。配置变更后重启后端重新发现工具。
+
+GitHub 服务和本地均限制只读，不加载创建、评论、合并等写工具；原有本地工具继续按 Plan/Manual/Auto 模式运行。
+
+## A2A 独立代码审查（可选）
+
+主 Agent 修改代码后，通过官方 A2A Python SDK 向独立运行的 Review Agent 提交需求、Git diff、有限源码片段和真实命令日志。服务只分析收到的材料，不提供终端或文件编辑工具。它返回结构化问题及上下文限制，审查结束不代表测试通过或需求验收通过。
+
+在实际运行后端的 Python 3.10+ 环境安装依赖，再分别启动两个进程：
+
+```bash
+python -m pip install -r requirements-a2a.txt
+
+# 终端一：独立 Review Agent，读取本机 .env 中的模型配置。
+python a2a_review_server.py --port 8100 --data-dir .agent/review-service
+
+# 终端二：为 Coding Agent 开启交付前审查，然后启动工作台。
+export A2A_REVIEW_URL=http://127.0.0.1:8100
+export A2A_REVIEW_TIMEOUT=120
+./start.sh
+```
+
+Review Agent 默认继承主模型供应商配置，可用 `A2A_REVIEW_PROVIDER` 选择另一组，并用 `A2A_REVIEW_MODEL` 单独指定型号；未设置 A2A_REVIEW_PROVIDER 时继承 LLM_PROVIDER 对应配置。绑定非本机地址时，必须在两端配置相同的 `A2A_REVIEW_TOKEN`，并通过 TLS 反代提供 `--public-url https://你的审查服务地址`；客户端仅允许 loopback 地址使用 HTTP。地址需能从 Coding Agent 主机访问。仅需验证协议时可给服务加 `--demo`，产物明确标为“协议演示，非模型审查”，不能计为模型审查成绩。
+
+启用后，非 Plan 运行结束且有 Git diff 时自动进入“独立审查中”；无变更会标记跳过。审查结果在交付报告中展示，可随 JSON 下载、刷新恢复。发现问题、服务错误、未知状态或过期结果都会让交付保持“不完整”；远端确认取消后才记录已取消。未配置 `A2A_REVIEW_URL` 时保持原有工作流，基础后端不要求安装 A2A 依赖。
+
+协议采用 Agent Card 发现和一种 HTTP JSON-RPC 绑定，支持任务提交、查询、取消和 `review.json` Artifact。`session_id/run_id` 与远端 `task_id/context_id` 分开记录；补丁与审查快照均带哈希，补丁变化后旧结果标为过期。请求先落盘，再发送；服务以稳定 invocation ID 去重并持久化到 SQLite，相同审查不会重复创建任务。服务重启后已完成结果仍可查询，执行中的任务明确标记失败，不假装恢复了模型执行。
+
+每次运行的 `.agent/runs/<run_id>/` 保存审查材料、客户端任务记录和交付报告。连接中断后，可在交付报告点击“查询原任务”，或用原会话、运行编号请求以下接口；查询期间暂停新代码任务，避免工作区变更导致结果错配：
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/reviews/resume \
+  -H 'Content-Type: application/json' \
+  -d '{"session_id":"原会话编号","run_id":"原运行编号"}'
+```
+
+首版材料有明确上限：diff 最多 48,000 字符、最多六个源码片段、总材料最多 128 KB；超限会明确失败，源码与日志截取范围写入产物的上下文限制。审查 Token 由远端实际 usage 单独记录，未上报时为未知，不按零计算。
 
 ## 部署
 
@@ -219,8 +315,9 @@ server {
 ```bash
 cd /path/to/code_agent
 AGENT_WORKDIR=/path/to/your/project \
-ANTHROPIC_BASE_URL=http://127.0.0.1:11434 \
-MODEL_ID=qwen2.5:3b \
+LLM_PROVIDER=ollama \
+OLLAMA_BASE_URL=http://127.0.0.1:11434 \
+OLLAMA_MODEL=qwen2.5:3b \
 python3 api_server.py
 ```
 
@@ -268,12 +365,15 @@ python3 api_server.py
 ## 开发检查
 
 ```bash
-cd frontend
-npm run lint
-npm run build
+python3 -m pip install -r requirements-dev.txt
+python3 -m pytest -q tests
+npm --prefix frontend ci
+npm --prefix frontend test
+npm --prefix frontend run lint
+npm --prefix frontend run build
 ```
 
-后端依赖可通过 `pip install -r requirements.txt` 安装；启动服务可检查基础初始化和模型连接配置。
+GitHub Actions 自动执行后端测试、前端测试、lint 与构建，不需要模型密钥。真实模型评测须显式启动，见 [evals/README.md](evals/README.md)。
 
 ## 常见问题
 

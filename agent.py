@@ -2,12 +2,11 @@
 import json
 import time
 from anthropic import Anthropic
-from dotenv import load_dotenv
+from components.config import Config, load_environment
 
-load_dotenv(override=True)
+load_environment()
 
 from core.loop import AgentLoop
-from components.config import Config
 from components.compactor import auto_compact
 from components.todo_manager import TodoManager
 from components.skill_loader import SkillLoader
@@ -23,14 +22,14 @@ from core.subagent import run_subagent
 
 def main():
     cfg = Config()
-    client = Anthropic(api_key=cfg.api_key, base_url=cfg.base_url)
+    client = Anthropic(**cfg.client_kwargs())
     model = cfg.model
     
     # 初始化基础组件
     skills = SkillLoader(cfg.skills_dir)
     bus = MessageBus(cfg.team_dir / "inbox")
     task_mgr = TaskManager(cfg.tasks_dir)
-    bg = BackgroundManager()
+    bg = BackgroundManager(cfg.workdir)
     team = TeammateManager(bus, task_mgr, client, model, cfg)
     todo = TodoManager()
     
@@ -59,7 +58,10 @@ def main():
         safety=safety,
         compactor=None,
     )
-    handlers["task"] = lambda **kw: run_subagent(client, model, kw["prompt"], kw.get("agent_type", "Explore"))
+    handlers["task"] = lambda **kw: run_subagent(
+        client, model, kw["prompt"], kw.get("agent_type", "Explore"),
+        cancellation_token=kw.get("_cancel_token"),
+    )
     
     # 自动生成工具列表描述
     tool_names = [t["name"] for t in tools]
@@ -82,7 +84,9 @@ Skills available:
         bg=bg,
         bus=bus,
         todo_manager=todo,
-        token_threshold=cfg.token_threshold
+        token_threshold=cfg.token_threshold,
+        limits=cfg.run_limits,
+        verification_command=cfg.verification_command,
     )
 
     print(f"Agent started at {cfg.workdir}")

@@ -1,0 +1,17 @@
+{
+  "backend_test_command": "python -m pytest -q tests",
+  "backend_tests_passed": 176,
+  "targeted_tests_passed": 61,
+  "latest_search_ab_tests_passed": 19,
+  "root_pytest": "Two collection errors in pre-existing hr fixture_repo tests: missing src import; application tests run with tests/ scope",
+  "new_dependencies": [],
+  "business_files_hashed": 76,
+  "business_source_changes": [],
+  "business_hash_before": "business-source-before.json",
+  "business_hash_after": "business-source-after.json",
+  "postprocessing_script_sha256": "c194117be67f53a50c80cd56a9df4e2e7b3699547a522a1ffb26e16d9c51e37c",
+  "model_output_limit_failures_retained": 4,
+  "final_protocol_valid": true,
+  "token_budget_overruns": 0,
+  "time_budget_overruns": 0
+}

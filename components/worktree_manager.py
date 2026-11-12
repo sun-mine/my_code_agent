@@ -1,5 +1,6 @@
 import json, re, subprocess
 from pathlib import Path
+from components.command_runner import command_error, run_command
 from components.event_bus import EventBus
 
 class WorktreeManager:
@@ -75,18 +76,17 @@ class WorktreeManager:
             lines.append(f"[{wt.get('status')}] {wt['name']} -> {wt['path']} ({wt.get('branch')}) task={wt.get('task_id')}")
         return "\n".join(lines)
 
-    def run(self, name, command):
+    def run(self, name, command, cancellation_token=None):
         wt = self._find(name)
         if not wt:
-            return f"Unknown worktree '{name}'"
+            return command_error(f"Error: Unknown worktree '{name}'")
         p = Path(wt["path"])
         if not p.exists():
-            return f"Path missing: {p}"
-        try:
-            r = subprocess.run(command, shell=True, cwd=p, capture_output=True, text=True, timeout=300)
-            return (r.stdout + r.stderr).strip()[:50000] or "(no output)"
-        except subprocess.TimeoutExpired:
-            return "Error: Timeout"
+            return command_error(f"Error: Path missing: {p}")
+        return run_command(
+            command, cwd=p, timeout=300,
+            cancellation_token=cancellation_token,
+        )
 
     def remove(self, name, force=False, complete_task=False):
         wt = self._find(name)

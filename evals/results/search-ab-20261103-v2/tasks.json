@@ -1,0 +1,118 @@
+{
+  "version": 1,
+  "provenance": "First-party exploratory tasks, not an external benchmark or secret heldout set",
+  "localization": [
+    {
+      "id": "loc-01-symbol",
+      "category": "exact_symbol",
+      "prompt": "lookup_symbol 收到 Service.fetch 这样的点式名字时，在哪里查找 Python 定义、文本引用和 imports，又在哪里包装为可调用工具？请定位这两个实现。",
+      "targets": [
+        [
+          "components/code_lookup.py",
+          "lookup_symbol"
+        ],
+        [
+          "tools/base.py",
+          "run_lookup_symbol"
+        ]
+      ]
+    },
+    {
+      "id": "loc-02-continuation",
+      "category": "exact_symbol",
+      "prompt": "needs_action_continuation 怎样识别只承诺执行却没有调用工具的回复？主循环在哪里触发补偿并决定运行未完成？请定位识别函数和调用它的主循环方法。",
+      "targets": [
+        [
+          "core/continuation.py",
+          "needs_action_continuation"
+        ],
+        [
+          "core/loop.py",
+          "AgentLoop.run"
+        ]
+      ]
+    },
+    {
+      "id": "loc-03-stop",
+      "category": "lifecycle",
+      "prompt": "用户点击停止后，系统怎样核对请求所属的会话和运行，再中断模型连接并取消正在执行的子进程？请定位入口、运行中断方法、取消令牌的取消方法。",
+      "targets": [
+        [
+          "api/routes/chat.py",
+          "interrupt_chat"
+        ],
+        [
+          "core/loop.py",
+          "AgentLoop.interrupt"
+        ],
+        [
+          "components/command_runner.py",
+          "CancellationToken.cancel"
+        ]
+      ]
+    },
+    {
+      "id": "loc-04-report",
+      "category": "lifecycle",
+      "prompt": "任务结束时，系统怎样把工作区差异和命令验证证据汇总、原子保存为交付报告，再写回运行记录？请定位报告的最终汇总方法和后端收尾函数。",
+      "targets": [
+        [
+          "components/run_report.py",
+          "RunReportRecorder.finalize"
+        ],
+        [
+          "api/run_lifecycle.py",
+          "_finish_run"
+        ]
+      ]
+    },
+    {
+      "id": "loc-05-language",
+      "category": "semantic",
+      "prompt": "经过多轮工具交互，助手仍应使用用户原始提问的语言。请定位识别用户请求语言的函数，以及只给本次模型请求添加语言提醒、同时避免改动原始消息列表的函数。",
+      "targets": [
+        [
+          "core/response_language.py",
+          "request_language"
+        ],
+        [
+          "core/response_language.py",
+          "with_response_language_reminder"
+        ]
+      ]
+    },
+    {
+      "id": "loc-06-retry",
+      "category": "semantic",
+      "prompt": "前端发送消息后如果没收到确认而重试，后端如何避免重复启动同一个任务？请定位 HTTP 消息入口，以及负责请求去重并启动运行的公共函数。",
+      "targets": [
+        [
+          "api/routes/chat.py",
+          "chat"
+        ],
+        [
+          "api/run_lifecycle.py",
+          "_start_run"
+        ]
+      ]
+    }
+  ],
+  "repairs": [
+    {
+      "id": "repair-001-clamp",
+      "prompt": "修复数值约束逻辑：返回值必须位于包含端点的上下界内；下界大于上界时抛出 ValueError。请查找实现并修改源码，保留测试。"
+    },
+    {
+      "id": "repair-004-parse-bool",
+      "prompt": "修复布尔选项解析：布尔值原样返回；字符串忽略两端空白和大小写，接受 true/false、yes/no、on/off、1/0；其他输入抛出 ValueError。请查找实现并修改源码，保留测试。"
+    },
+    {
+      "id": "repair-010-mask-email",
+      "prompt": "修复邮箱脱敏：去掉地址两端空白；合法地址仅含一个 @，本地部分保留首字符并接三个星号，域名保留；缺失本地部分或域名时抛出 ValueError。请查找实现并修改源码，保留测试。"
+    },
+    {
+      "id": "repair-013-page",
+      "prompt": "修复分页处理：页码从一开始，返回该页元素列表；页码和每页数量都必须大于零，否则抛出 ValueError。请查找实现并修改源码，保留测试。"
+    }
+  ]
+}

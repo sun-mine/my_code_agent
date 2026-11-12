@@ -1,5 +1,12 @@
 import { v4 as uuidv4 } from 'uuid'
-import type { AgentEvent, ChatMessage, ContentBlock, TodoItem } from './types'
+import type { AgentEvent, ChatMessage, ContentBlock, DeliveryReport, ImageAttachment, TodoItem } from './types'
+
+const sessionDrafts = new Map<string, { draft: string; images: ImageAttachment[] }>()
+export const chatDrafts = {
+  get: (sessionId: string) => sessionDrafts.get(sessionId),
+  set: (sessionId: string, draft: string, images: ImageAttachment[]) => sessionDrafts.set(sessionId, { draft, images }),
+  clear: (sessionId: string) => sessionDrafts.delete(sessionId),
+}
 
 export interface ToolCall {
   id: string
@@ -7,9 +14,22 @@ export interface ToolCall {
   name: string
   input: Record<string, unknown>
   output?: string
-  status: 'running' | 'done' | 'error'
+  status: 'running' | 'done' | 'error' | 'cancelled'
   ts_start: number
   ts_end?: number
+  is_error?: boolean
+  cancelled?: boolean
+  timed_out?: boolean
+  exit_code?: number
+  duration?: number
+}
+
+export interface PendingMessage {
+  requestId: string
+  content: string | ContentBlock[]
+  mode: string
+  status: 'queued' | 'sending' | 'failed'
+  error?: string
 }
 
 export interface FileChange {
@@ -38,7 +58,7 @@ export interface PlanOption {
   description?: string | null
 }
 
-type AgentState = 'idle' | 'thinking' | 'executing_tool'
+type AgentState = 'idle' | 'thinking' | 'executing_tool' | 'reviewing' | 'cancelling'
 
 interface ChatSessionState {
   messages: ChatMessage[]
@@ -50,6 +70,10 @@ interface ChatSessionState {
   changedFiles: FileChange[]
   planProposal: PlanProposal | null
   planOptions: PlanOption[] | null
+  pendingMessage: PendingMessage | null
+  canResume: boolean
+  draftResetEpoch: number
+  deliveryReports: DeliveryReport[]
 }
 
 export interface HydrateSnapshot {
@@ -57,6 +81,9 @@ export interface HydrateSnapshot {
   event_seq: number
   running?: boolean
   run_id?: string | null
+  phase?: 'running' | 'reviewing' | 'finishing' | null
+  accepted_requests?: Record<string, string>
+  delivery_reports?: DeliveryReport[]
 }
 
 type StateUpdate<T> = T | ((previous: T) => T)
@@ -76,6 +103,10 @@ interface SessionEntry {
   lastSnapshotRunning: boolean | null
   /** Events received from the socket, retained until a later snapshot contains them. */
   liveEvents: AgentEvent[]
+  stateBeforeStopping: AgentState
+  pendingResolver: ((accepted: boolean) => void) | null
+  hydratedAcceptedRunId: string | null
+  lastTerminalRunId: string | null
 }
 
 const CREATE_TOOLS = new Set(['write_file', 'create_file', 'save_file'])
@@ -97,6 +128,10 @@ function initialState(messages: ChatMessage[] = []): ChatSessionState {
     changedFiles: [],
     planProposal: null,
     planOptions: null,
+    pendingMessage: null,
+    canResume: false,
+    draftResetEpoch: 0,
+    deliveryReports: [],
   }
 }
 
@@ -116,6 +151,10 @@ function createEntry(messages: ChatMessage[] = []): SessionEntry {
     hydratedBoundary: -1,
     lastSnapshotRunning: null,
     liveEvents: [],
+    stateBeforeStopping: 'thinking',
+    pendingResolver: null,
+    hydratedAcceptedRunId: null,
+    lastTerminalRunId: null,
   }
 }
 
@@ -154,6 +193,12 @@ function finalizeStreamingMessage(
       return { ...message, content, streaming: false }
     }),
   }
+}
+
+function upsertDeliveryReport(reports: DeliveryReport[], report: DeliveryReport): DeliveryReport[] {
+  return [...reports.filter(item => item.run_id !== report.run_id), report]
+    .sort((left, right) => left.finished_at - right.finished_at)
+    .slice(-5)
 }
 
 /**
@@ -208,12 +253,22 @@ export class ChatStore {
     })
 
     const entry = createEntry(messages)
+    entry.state.pendingMessage = current?.state.pendingMessage ?? null
+    entry.state.draftResetEpoch = current?.state.draftResetEpoch ?? 0
+    entry.pendingResolver = current?.pendingResolver ?? null
+    entry.hydratedAcceptedRunId = entry.state.pendingMessage
+      ? snapshot.accepted_requests?.[entry.state.pendingMessage.requestId] ?? null
+      : null
+    for (const report of snapshot.delivery_reports ?? []) {
+      if (report.session_id !== sessionId) continue
+      entry.state.deliveryReports = upsertDeliveryReport(entry.state.deliveryReports, report)
+    }
     entry.hydratedBoundary = boundary
     entry.lastSnapshotRunning = snapshot.running ?? false
     if (snapshot.running) {
       entry.state = {
         ...entry.state,
-        agentState: 'thinking',
+        agentState: snapshot.phase === 'reviewing' ? 'reviewing' : 'thinking',
         runId: snapshot.run_id ?? null,
       }
       entry.currentRunId = snapshot.run_id ?? null
@@ -229,6 +284,11 @@ export class ChatStore {
     for (const event of snapshotEvents) {
       // The endpoint owns these events even if an older server omitted the redundant id.
       this.applyEvent(entry, event.session_id ? event : { ...event, session_id: sessionId })
+    }
+    // The snapshot phase is the latest server truth even when an older event list
+    // does not contain the transition that entered review.
+    if (snapshot.running && snapshot.phase === 'reviewing' && entry.currentRunId) {
+      entry.state = { ...entry.state, agentState: 'reviewing' }
     }
     entry.lastEventSeq = Math.max(entry.lastEventSeq, boundary)
     entry.liveEvents = pendingEvents
@@ -248,23 +308,127 @@ export class ChatStore {
     if (this.activeSessionId === sessionId) this.emit()
   }
 
-  addUserMessage(content: string | ContentBlock[]): void {
-    this.updateActive(entry => {
-      entry.state = {
-        ...entry.state,
-        messages: [...entry.state.messages, {
-          id: uuidv4(),
-          role: 'user',
-          content,
-          ts: Date.now(),
-          runId: entry.currentRunId ?? undefined,
-        }],
+  enqueueMessage(sessionId: string, content: string | ContentBlock[], mode: string): Promise<boolean> {
+    const entry = this.ensureEntry(sessionId)
+    if (entry.state.pendingMessage) return Promise.resolve(false)
+    const pending: PendingMessage = {
+      requestId: uuidv4(),
+      content,
+      mode,
+      status: 'queued',
+    }
+    entry.state = {
+      ...entry.state,
+      pendingMessage: pending,
+      canResume: false,
+    }
+    const accepted = new Promise<boolean>(resolve => { entry.pendingResolver = resolve })
+    entry.hydratedAcceptedRunId = null
+    if (this.activeSessionId === sessionId) this.emit()
+    return accepted
+  }
+
+  updatePendingMessage(
+    sessionId: string,
+    requestId: string,
+    status: PendingMessage['status'],
+    error?: string,
+  ): void {
+    const entry = this.ensureEntry(sessionId)
+    entry.state = {
+      ...entry.state,
+      pendingMessage: entry.state.pendingMessage?.requestId === requestId
+        ? { ...entry.state.pendingMessage, status, error }
+        : entry.state.pendingMessage,
+    }
+    if (this.activeSessionId === sessionId) this.emit()
+  }
+
+  acceptPendingMessage(sessionId: string, requestId: string, runId: string): boolean {
+    const entry = this.ensureEntry(sessionId)
+    const pending = entry.state.pendingMessage?.requestId === requestId ? entry.state.pendingMessage : null
+    if (!pending) return false
+    const hydratedAccepted = entry.hydratedAcceptedRunId === runId
+    const terminal = entry.lastTerminalRunId === runId || (hydratedAccepted && entry.lastSnapshotRunning === false)
+    const userMessage: ChatMessage = {
+      id: uuidv4(), role: 'user', content: pending.content, ts: Date.now(), runId,
+    }
+    const insertAt = entry.state.messages.findIndex(message =>
+      message.role === 'assistant' && message.runId === runId,
+    )
+    const messages = hydratedAccepted
+      ? entry.state.messages
+      : insertAt < 0
+        ? [...entry.state.messages, userMessage]
+        : [...entry.state.messages.slice(0, insertAt), userMessage, ...entry.state.messages.slice(insertAt)]
+    if (!terminal) entry.currentRunId = runId
+    entry.state = {
+      ...entry.state,
+      pendingMessage: null,
+      messages,
+      runId: terminal ? null : runId,
+      agentState: terminal ? 'idle' : entry.state.agentState === 'idle' ? 'thinking' : entry.state.agentState,
+      canResume: terminal ? entry.state.canResume : false,
+      draftResetEpoch: entry.state.draftResetEpoch + 1,
+    }
+    entry.pendingResolver?.(true)
+    entry.pendingResolver = null
+    entry.hydratedAcceptedRunId = null
+    if (this.activeSessionId === sessionId) this.emit()
+    return !terminal
+  }
+
+  cancelPendingMessage(sessionId: string, requestId: string): void {
+    const entry = this.ensureEntry(sessionId)
+    const pending = entry.state.pendingMessage?.requestId === requestId ? entry.state.pendingMessage : null
+    if (!pending || pending.status === 'sending') return
+    entry.state = {
+      ...entry.state,
+      pendingMessage: null,
+    }
+    entry.pendingResolver?.(false)
+    entry.pendingResolver = null
+    entry.hydratedAcceptedRunId = null
+    if (this.activeSessionId === sessionId) this.emit()
+  }
+
+  getNextPendingMessage(): { sessionId: string; message: PendingMessage } | null {
+    for (const [sessionId, entry] of this.sessions) {
+      if (entry.state.pendingMessage?.status === 'queued') {
+        return { sessionId, message: entry.state.pendingMessage }
       }
-    })
+    }
+    return null
+  }
+
+  setStopping(sessionId: string, stopping: boolean): void {
+    const entry = this.ensureEntry(sessionId)
+    if (stopping) {
+      if (!entry.currentRunId || entry.state.agentState === 'cancelling') return
+      entry.stateBeforeStopping = entry.state.agentState
+      entry.state = { ...entry.state, agentState: 'cancelling' }
+    } else {
+      if (entry.state.agentState !== 'cancelling') return
+      entry.state = { ...entry.state, agentState: entry.stateBeforeStopping }
+    }
+    if (this.activeSessionId === sessionId) this.emit()
+  }
+
+  replaceDeliveryReport(sessionId: string, runId: string, report: DeliveryReport): boolean {
+    const entry = this.sessions.get(sessionId)
+    if (!entry || report.session_id !== sessionId || report.run_id !== runId ||
+        !entry.state.deliveryReports.some(item => item.run_id === runId)) return false
+    entry.state = {
+      ...entry.state,
+      deliveryReports: upsertDeliveryReport(entry.state.deliveryReports, report),
+    }
+    if (this.activeSessionId === sessionId) this.emit()
+    return true
   }
 
   clearAll(): void {
     this.updateActive(entry => {
+      entry.pendingResolver?.(false)
       const lastEventSeq = entry.lastEventSeq
       const hydratedBoundary = Math.max(entry.hydratedBoundary, lastEventSeq)
       Object.assign(entry, createEntry())
@@ -339,7 +503,7 @@ export class ChatStore {
     }
 
     const isTerminal = event.type === 'run_end' || event.type === 'interrupted' || event.type === 'error'
-    if (event.type !== 'run_start' && !isTerminal && event.run_id) {
+    if (event.type !== 'run_start' && event.type !== 'delivery_report' && !isTerminal && event.run_id) {
       if (entry.currentRunId && event.run_id !== entry.currentRunId) return true
       // A socket can deliver the first streamed event before the HTTP/socket start
       // acknowledgement. Treat that event as sufficient evidence that the run is live.
@@ -354,6 +518,16 @@ export class ChatStore {
     }
 
     switch (event.type) {
+      case 'delivery_report': {
+        const report = event.report
+        if (!report || report.session_id !== event.session_id || report.run_id !== event.run_id) break
+        entry.state = {
+          ...entry.state,
+          deliveryReports: upsertDeliveryReport(entry.state.deliveryReports, report),
+        }
+        break
+      }
+
       case 'run_start': {
         const nextRunId = event.run_id ?? null
         const sameRun = nextRunId !== null && entry.currentRunId === nextRunId
@@ -362,6 +536,7 @@ export class ChatStore {
           runId: nextRunId,
           agentState: entry.state.agentState === 'executing_tool' && sameRun ? 'executing_tool' : 'thinking',
           planOptions: sameRun ? entry.state.planOptions : null,
+          canResume: false,
         }
         if (!sameRun) {
           entry.currentRunId = nextRunId
@@ -399,6 +574,7 @@ export class ChatStore {
           runId: null,
           agentState: 'idle',
           pendingApprovals: [],
+          canResume: entry.state.canResume,
           toolCalls: entry.state.toolCalls.map(toolCall =>
             toolCall.run_id === (event.run_id ?? '') && toolCall.status === 'running'
               ? { ...toolCall, status: 'done' as const, ts_end: event.ts }
@@ -422,11 +598,18 @@ export class ChatStore {
           break
         }
         entry.currentRunId = null
+        entry.lastTerminalRunId = event.run_id ?? endingRunId ?? null
         break
       }
 
       case 'agent_state':
         if (event.state) entry.state = { ...entry.state, agentState: event.state }
+        break
+
+      case 'a2a_review':
+        if (entry.state.agentState !== 'cancelling') {
+          entry.state = { ...entry.state, agentState: 'reviewing' }
+        }
         break
 
       case 'chunk': {
@@ -550,16 +733,27 @@ export class ChatStore {
         break
       }
 
-      case 'tool_result':
+      case 'tool_result': {
+        const status: ToolCall['status'] = event.cancelled
+          ? 'cancelled'
+          : event.is_error ? 'error' : 'done'
+        const result = {
+          output: event.output,
+          ts_end: event.ts,
+          status,
+          is_error: event.is_error,
+          cancelled: event.cancelled,
+          timed_out: event.timed_out,
+          exit_code: event.exit_code,
+          duration: event.duration,
+        }
         entry.state = {
           ...entry.state,
-          agentState: 'thinking',
+          agentState: entry.state.agentState === 'cancelling' ? 'cancelling' : 'thinking',
           pendingApprovals: entry.state.pendingApprovals.filter(approval => approval.id !== event.tool_use_id),
           toolCalls: entry.state.toolCalls.map(toolCall => toolCall.id === event.tool_use_id ? {
             ...toolCall,
-            output: event.output,
-            ts_end: event.ts,
-            status: 'done' as const,
+            ...result,
           } : toolCall),
           messages: entry.state.messages.map(message => {
             if (!message.toolCalls?.some(toolCall => toolCall.id === event.tool_use_id)) return message
@@ -567,9 +761,7 @@ export class ChatStore {
               ...message,
               toolCalls: message.toolCalls.map(toolCall => toolCall.id === event.tool_use_id ? {
                 ...toolCall,
-                output: event.output,
-                ts_end: event.ts,
-                status: 'done' as const,
+                ...result,
               } : toolCall),
               steps: (message.steps ?? []).map(step => {
                 const stepToolCall = step.toolCall
@@ -580,9 +772,7 @@ export class ChatStore {
                   ...step,
                   toolCall: {
                     ...stepToolCall,
-                    output: event.output,
-                    ts_end: event.ts,
-                    status: 'done' as const,
+                    ...result,
                   },
                 }
               }),
@@ -591,6 +781,7 @@ export class ChatStore {
         }
         entry.pendingBash.delete(event.tool_use_id ?? '')
         break
+      }
 
       case 'tool_approval_request':
         entry.state = {
@@ -648,25 +839,39 @@ export class ChatStore {
         const finishedStreamingId = entry.streamingId
         entry.streamingId = null
         entry.currentRunId = null
+        entry.lastTerminalRunId = event.run_id ?? null
         entry.state = {
           ...finalizeStreamingMessage(entry.state, finishedStreamingId, true),
           agentState: 'idle',
           runId: null,
           pendingApprovals: [],
+          canResume: true,
+          toolCalls: entry.state.toolCalls.map(toolCall =>
+            toolCall.run_id === (event.run_id ?? '') && toolCall.status === 'running'
+              ? { ...toolCall, status: 'cancelled' as const, cancelled: true, ts_end: event.ts }
+              : toolCall,
+          ),
         }
         break
       }
 
       case 'error': {
         const finishedStreamingId = entry.streamingId
-        entry.streamingId = null
-        entry.currentRunId = null
+        const stopping = entry.state.agentState === 'cancelling'
+        if (!stopping) {
+          entry.streamingId = null
+          entry.currentRunId = null
+          entry.lastTerminalRunId = event.run_id ?? null
+        }
+        const finalized = stopping
+          ? entry.state
+          : finalizeStreamingMessage(entry.state, finishedStreamingId)
         entry.state = {
-          ...finalizeStreamingMessage(entry.state, finishedStreamingId),
-          agentState: 'idle',
-          runId: null,
-          pendingApprovals: [],
-          messages: [...finalizeStreamingMessage(entry.state, finishedStreamingId).messages, {
+          ...finalized,
+          agentState: stopping ? 'cancelling' : 'idle',
+          runId: stopping ? entry.state.runId : null,
+          pendingApprovals: stopping ? entry.state.pendingApprovals : [],
+          messages: [...finalized.messages, {
             id: uuidv4(),
             role: 'assistant',
             content: `⚠️ 错误：${event.message || '未知错误'}`,

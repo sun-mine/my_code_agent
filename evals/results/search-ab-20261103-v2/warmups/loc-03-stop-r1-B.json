@@ -1,0 +1,43 @@
+{
+  "response": {
+    "model": "qwen2.5:3b",
+    "created_at": "2026-11-03T12:34:56.059063Z",
+    "message": {
+      "role": "assistant",
+      "content": "OK"
+    },
+    "done": true,
+    "done_reason": "length",
+    "total_duration": 106221875,
+    "load_duration": 26714792,
+    "prompt_eval_count": 32,
+    "prompt_eval_cached_count": 31,
+    "prompt_eval_duration": 58553000,
+    "eval_count": 1,
+    "eval_duration": 1000
+  },
+  "residency": {
+    "models": [
+      {
+        "name": "qwen2.5:3b",
+        "model": "qwen2.5:3b",
+        "size": 2318747565,
+        "digest": "357c53fb659c5076de1d65ccb0b397446227b71a42be9d1603d46168015c9e4b",
+        "details": {
+          "parent_model": "",
+          "format": "gguf",
+          "family": "qwen2",
+          "families": [
+            "qwen2"
+          ],
+          "parameter_size": "3.1B",
+          "quantization_level": "Q4_K_M"
+        },
+        "expires_at": "2026-11-03T20:39:56.059636+08:00",
+        "size_vram": 2318747565,
+        "context_length": 8192,
+        "runner": "llamacpp"
+      }
+    ]
+  }
+}

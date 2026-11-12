@@ -32,20 +32,48 @@ stop_existing_port() {
 # 需要切换其他服务时再创建 .env 覆盖以下变量：
 if [ ! -f ".env" ]; then
   echo -e "${YELLOW}ℹ️  未找到 .env，使用默认配置: 本地 Ollama (http://localhost:11434)${NC}"
-  echo "  如需覆盖，可在 .env 中设置:"
-  echo "    ANTHROPIC_BASE_URL=http://localhost:11434"
-  echo "    ANTHROPIC_AUTH_TOKEN=ollama"
-  echo "    MODEL_ID=qwen2.5:3b"
+  echo "  如需配置其他模型，请复制 .env.example 为 .env，修改 LLM_PROVIDER 和对应密钥。"
+fi
+
+# ── 读取公共服务配置 ──────────────────────────────
+# 先选定后端实际使用的 Python，再由 components.config 从项目根 .env
+# 读取公共服务参数。不要 source .env，避免把模型密钥导入 shell。
+if [ -x "$SCRIPT_DIR/.venv/bin/python" ]; then
+  PYTHON_COMMAND=("$SCRIPT_DIR/.venv/bin/python")
+elif command -v conda &>/dev/null && conda env list | grep -q "code_agent"; then
+  PYTHON_COMMAND=(conda run -n code_agent python)
+else
+  PYTHON_COMMAND=(python3)
+fi
+
+SERVER_CONFIG_OUTPUT="$("${PYTHON_COMMAND[@]}" - <<'PY'
+from components.config import Config, load_environment
+
+load_environment()
+
+server = Config()
+host = str(server.host)
+port = int(server.port)
+frontend_port = int(server.frontend_port)
+healthcheck_host = {"0.0.0.0": "127.0.0.1", "::": "::1"}.get(host, host)
+if ":" in healthcheck_host and not healthcheck_host.startswith("["):
+    healthcheck_host = f"[{healthcheck_host}]"
+healthcheck_url = f"http://{healthcheck_host}:{port}/api/status"
+
+print("\t".join((host, str(port), str(frontend_port), healthcheck_url)))
+PY
+)"
+IFS=$'\t' read -r API_HOST API_PORT FRONTEND_PORT HEALTHCHECK_URL <<< "$SERVER_CONFIG_OUTPUT"
+
+if [ -z "$API_HOST" ] || [ -z "$API_PORT" ] || [ -z "$FRONTEND_PORT" ] || [ -z "$HEALTHCHECK_URL" ]; then
+  echo -e "${RED}❌ 无法读取公共服务配置${NC}"
+  exit 1
 fi
 
 # ── 后端 ──────────────────────────────────────────
-echo -e "${GREEN}▶ 启动后端 (http://localhost:8000)${NC}"
-stop_existing_port 8000
-if command -v conda &>/dev/null && conda env list | grep -q "code_agent"; then
-  conda run -n code_agent python api_server.py &
-else
-  python3 api_server.py &
-fi
+echo -e "${GREEN}▶ 启动后端 (${HEALTHCHECK_URL%/api/status})${NC}"
+stop_existing_port "$API_PORT"
+"${PYTHON_COMMAND[@]}" api_server.py &
 BACKEND_PID=$!
 echo "  后端 PID: $BACKEND_PID"
 
@@ -55,7 +83,7 @@ BACKEND_READY=false
 for i in $(seq 1 30); do
   sleep 1
   echo -n "."
-  if curl -sf http://localhost:8000/api/status >/dev/null 2>&1; then
+  if curl -sf "$HEALTHCHECK_URL" >/dev/null 2>&1; then
     echo -e " ${GREEN}OK${NC}"
     BACKEND_READY=true
     break
@@ -69,8 +97,8 @@ if [ "$BACKEND_READY" != true ]; then
 fi
 
 # ── 前端 ──────────────────────────────────────────
-echo -e "${GREEN}▶ 启动前端 (http://localhost:5173)${NC}"
-stop_existing_port 5173
+echo -e "${GREEN}▶ 启动前端 (http://localhost:${FRONTEND_PORT})${NC}"
+stop_existing_port "$FRONTEND_PORT"
 cd frontend
 npm run dev &
 FRONTEND_PID=$!
@@ -78,8 +106,8 @@ echo "  前端 PID: $FRONTEND_PID"
 
 echo "────────────────────────────────────────────"
 echo -e "${GREEN}✅ 服务已启动${NC}"
-echo "  前端:  http://localhost:5173"
-echo "  后端:  http://localhost:8000"
+echo "  前端:  http://localhost:${FRONTEND_PORT}"
+echo "  后端:  ${HEALTHCHECK_URL%/api/status}"
 echo ""
 echo "按 Ctrl+C 停止所有服务"
 

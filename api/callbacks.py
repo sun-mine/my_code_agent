@@ -80,6 +80,11 @@ def _push_run_event(context, event: dict):
         owned["run_id"] = context.run_id
         owned["event_seq"] = context.event_seq
         context.events.append(owned)
+    if context.run_reporter and not context.run_reporter.record_event(owned):
+        api_server.app.logger.error(
+            "Failed to persist run event %s for %s",
+            owned.get("type"), context.run_id,
+        )
     api_server.socketio.emit("agent_event", owned)
 
 
@@ -139,7 +144,8 @@ def _approval_callback_for(context):
             remaining = max(deadline - time.time(), 0)
             if event.wait(timeout=min(0.1, remaining)):
                 break
-            if context.agent._interrupt_flag.is_set():
+            token = getattr(context.agent, "_cancel_token", None)
+            if context.agent._interrupt_flag.is_set() or (token and token.is_cancelled):
                 result[0] = False
                 break
 

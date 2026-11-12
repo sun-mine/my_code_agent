@@ -92,7 +92,7 @@ SAFETY_TOOLS = [
     },
     {
         "name": "safety_enter_sandbox",
-        "description": "进入沙箱模式，在隔离环境中执行操作。",
+        "description": "预留接口，当前不支持安全沙箱隔离，调用会返回错误。",
         "input_schema": {
             "type": "object",
             "properties": {}

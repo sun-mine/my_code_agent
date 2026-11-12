@@ -1,7 +1,11 @@
-import subprocess
 import os
 import fnmatch
+import json
 from pathlib import Path
+
+from components.command_runner import (
+    CancellationToken, ToolResult, command_error, run_command,
+)
 
 CATEGORY = "core"
 
@@ -26,18 +30,24 @@ def safe_path(p: str) -> Path:
     return path
 
 
-def run_bash(command: str) -> str:
+def run_bash(
+    command: str,
+    timeout: float = 120,
+    cancellation_token: CancellationToken = None,
+) -> str:
     dangerous = ["rm -rf /", "sudo ", "shutdown", "reboot",
                  "mkfs", "dd if=", ":(){ :|:& };:", "chmod 777 /"]
     if any(d in command for d in dangerous):
-        return "Error: Dangerous command blocked"
+        return command_error("Error: Dangerous command blocked")
     try:
-        r = subprocess.run(command, shell=True, cwd=str(_workdir),
-                           capture_output=True, text=True, timeout=120)
-        out = (r.stdout + r.stderr).strip()
-        return out[:50000] if out else "(no output)"
-    except subprocess.TimeoutExpired:
-        return "Error: Timeout (120s)"
+        return run_command(
+            command,
+            cwd=_workdir,
+            timeout=timeout,
+            cancellation_token=cancellation_token,
+        )
+    except Exception as e:
+        return command_error(f"Error: {e}")
 
 def run_read(path: str, limit: int = None) -> str:
     try:
@@ -46,7 +56,7 @@ def run_read(path: str, limit: int = None) -> str:
             lines = lines[:limit] + [f"... ({len(lines) - limit} more)"]
         return "\n".join(lines)[:50000]
     except Exception as e:
-        return f"Error: {e}"
+        return ToolResult(f"Error: {e}", is_error=True)
 
 def run_write(path: str, content: str) -> str:
     try:
@@ -55,24 +65,30 @@ def run_write(path: str, content: str) -> str:
         fp.write_text(content)
         return f"Wrote {len(content)} bytes"
     except Exception as e:
-        return f"Error: {e}"
+        return ToolResult(f"Error: {e}", is_error=True)
 
 def run_edit(path: str, old_text: str, new_text: str) -> str:
     try:
         fp = safe_path(path)
         c = fp.read_text()
         if old_text not in c:
-            return f"Error: Text not found"
+            excerpt = c[:4000]
+            suffix = "\n...[truncated; use read_file for the rest]" if len(c) > 4000 else ""
+            return ToolResult(
+                f"Error: Text not found in {path}. Read the current source before retrying; "
+                f"old_text must match exactly.\nCurrent source:\n{excerpt}{suffix}",
+                is_error=True,
+            )
         fp.write_text(c.replace(old_text, new_text, 1))
         return f"Edited {path}"
     except Exception as e:
-        return f"Error: {e}"
+        return ToolResult(f"Error: {e}", is_error=True)
 
 def run_list_files(path: str = ".", depth: int = 2) -> str:
     try:
         target = safe_path(path) if path != "." else _workdir
         if not target.exists():
-            return f"Error: path not found: {path}"
+            return ToolResult(f"Error: path not found: {path}", is_error=True)
         lines = []
         prefix_len = len(str(_workdir)) + 1
         for root, dirs, files in os.walk(str(target)):
@@ -90,7 +106,7 @@ def run_list_files(path: str = ".", depth: int = 2) -> str:
                     lines.append(os.path.join(rel, f))
         return "\n".join(lines[:500]) if lines else "(empty directory)"
     except Exception as e:
-        return f"Error: {e}"
+        return ToolResult(f"Error: {e}", is_error=True)
 
 def run_glob(pattern: str, path: str = ".") -> str:
     try:
@@ -105,7 +121,7 @@ def run_glob(pattern: str, path: str = ".") -> str:
                     matches.append(os.path.join(rel, name))
         return "\n".join(matches[:200]) if matches else "(no matches)"
     except Exception as e:
-        return f"Error: {e}"
+        return ToolResult(f"Error: {e}", is_error=True)
 
 def run_grep(pattern: str, path: str = ".", glob: str = None) -> str:
     try:
@@ -137,9 +153,19 @@ def run_grep(pattern: str, path: str = ".", glob: str = None) -> str:
                     continue
         return "\n".join(results) if results else "(no matches)"
     except Exception as e:
-        return f"Error: {e}"
+        return ToolResult(f"Error: {e}", is_error=True)
+
+
+def run_lookup_symbol(symbol: str, path: str = ".") -> str:
+    from components.code_lookup import lookup_symbol
+    try:
+        return json.dumps(lookup_symbol(_workdir, symbol, path), ensure_ascii=False)
+    except (OSError, ValueError) as exc:
+        return ToolResult(f"Error: {exc}", is_error=True)
 
 BASE_TOOLS = [
+    {"name": "lookup_symbol", "description": "Locate Python function/class definitions, text reference candidates and nearby imports. Returns workspace paths and line numbers; not a call graph. Use grep for other languages.",
+     "input_schema": {"type": "object", "properties": {"symbol": {"type": "string"}, "path": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "bash", "description": "Run a shell command.",
      "input_schema": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}},
     {"name": "read_file", "description": "Read file.",
@@ -159,7 +185,10 @@ BASE_TOOLS = [
 ]
 
 BASE_HANDLERS = {
-    "bash": lambda **kw: run_bash(kw["command"]),
+    "lookup_symbol": lambda **kw: run_lookup_symbol(kw["symbol"], kw.get("path", ".")),
+    "bash": lambda **kw: run_bash(
+        kw["command"], kw.get("timeout", 120), kw.get("_cancel_token")
+    ),
     "read_file": lambda **kw: run_read(kw["path"], kw.get("limit")),
     "write_file": lambda **kw: run_write(kw["path"], kw["content"]),
     "edit_file": lambda **kw: run_edit(kw["path"], kw["old_text"], kw["new_text"]),

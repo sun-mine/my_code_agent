@@ -41,6 +41,8 @@ def clear_history():
             return _err("session not found", 404)
         try:
             record["history"] = []
+            record["history_run_ids"] = []
+            record["delivery_reports"] = []
             store.save(record)
         except Exception as exc:
             return _err(f"Failed to clear session: {exc}", 500)

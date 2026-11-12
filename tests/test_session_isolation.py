@@ -23,8 +23,10 @@ class ControlledAgent:
         self.tools = []
         self.model = "claude-test"
         self.system = "test"
+        self.message_key_sets = []
 
     def run(self, history, run_id=None, plan_mode=False):
+        self.message_key_sets.append([set(message) for message in history])
         self.current_run_id = run_id
         self.state = "thinking"
         self.event_callback({"type": "run_start", "run_id": run_id})
@@ -71,6 +73,19 @@ class PartialInterruptAgent(ControlledAgent):
         self.event_callback({"type": "run_end", "run_id": run_id})
         self.state = "idle"
         self.current_run_id = None
+
+
+class CompactingAgent(ControlledAgent):
+    def run(self, history, run_id=None, plan_mode=False):
+        self.message_key_sets.append([set(message) for message in history])
+        retained = history[1]
+        history[:] = [
+            {"role": "user", "content": "summary"},
+            retained,
+            history[-1],
+        ]
+        history.append({"role": "assistant", "content": "after compact"})
+        self.event_callback({"type": "run_end", "run_id": run_id, "outcome": "completed"})
 
 
 def wait_for(predicate, timeout=3):
@@ -211,6 +226,222 @@ def test_run_admission_is_atomic_for_concurrent_submissions(isolated_server):
     wait_for(lambda: api_server._running_ctx is None)
     history = state["store"].get(sid)["history"]
     assert len([item for item in history if item["role"] == "user"]) == 1
+
+
+def test_history_run_ids_survive_two_runs_and_store_reload_without_model_metadata(
+    isolated_server,
+):
+    state = isolated_server
+    client = api_server.app.test_client()
+    sid = state["first"]["id"]
+
+    first = data(client.post("/api/chat", json={"session_id": sid, "message": "first"}))
+    assert state["agent"].started.wait(timeout=1)
+    running = data(client.get(f"/api/history?session_id={sid}"))
+    assert running["history_run_ids"] == [first["run_id"]]
+    assert len(running["history_run_ids"]) == len(running["history"])
+    state["agent"].release.set()
+    wait_for(lambda: api_server._running_ctx is None)
+
+    state["agent"].started.clear()
+    state["agent"].release.clear()
+    second = data(client.post("/api/chat", json={"session_id": sid, "message": "second"}))
+    assert state["agent"].started.wait(timeout=1)
+    running = data(client.get(f"/api/history?session_id={sid}"))
+    assert running["history_run_ids"] == [
+        first["run_id"], first["run_id"], second["run_id"],
+    ]
+    state["agent"].release.set()
+    wait_for(lambda: api_server._running_ctx is None)
+
+    expected = [first["run_id"], first["run_id"], second["run_id"], second["run_id"]]
+    assert state["store"].get(sid)["history_run_ids"] == expected
+    reloaded = SessionStore(state["store"].directory)
+    api_server._session_stores[str(state["workspace"].resolve())] = reloaded
+    api_server._session_store = reloaded
+    snapshot = data(client.get(f"/api/history?session_id={sid}"))
+    assert snapshot["history_run_ids"] == expected
+    assert len(snapshot["history_run_ids"]) == len(snapshot["history"])
+    assert all(
+        keys == {"role", "content"}
+        for run_keys in state["agent"].message_key_sets
+        for keys in run_keys
+    )
+    assert client.delete(f"/api/history?session_id={sid}").status_code == 200
+    assert reloaded.get(sid)["history_run_ids"] == []
+
+
+def test_compaction_keeps_retained_message_owner_by_object_identity(
+    isolated_server, monkeypatch,
+):
+    state = isolated_server
+    client = api_server.app.test_client()
+    sid = state["first"]["id"]
+
+    first = data(client.post("/api/chat", json={"session_id": sid, "message": "first"}))
+    assert state["agent"].started.wait(timeout=1)
+    state["agent"].release.set()
+    wait_for(lambda: api_server._running_ctx is None)
+
+    compacting_agent = CompactingAgent()
+    monkeypatch.setattr(api_server, "agent_instance", compacting_agent)
+    second = data(client.post("/api/chat", json={"session_id": sid, "message": "second"}))
+    wait_for(lambda: api_server._running_ctx is None)
+
+    record = state["store"].get(sid)
+    assert [message["role"] for message in record["history"]] == [
+        "user", "assistant", "user", "assistant",
+    ]
+    assert record["history"][0]["content"] == "summary"
+    assert record["history"][1]["content"][0]["text"] == "answer"
+    assert [message["content"] for message in record["history"][2:]] == [
+        "second", "after compact",
+    ]
+    assert record["history_run_ids"] == [
+        second["run_id"], first["run_id"], second["run_id"], second["run_id"],
+    ]
+    assert all(
+        keys == {"role", "content"}
+        for run_keys in compacting_agent.message_key_sets
+        for keys in run_keys
+    )
+
+
+def test_legacy_history_without_run_ids_is_exposed_as_unknown(isolated_server):
+    state = isolated_server
+    sid = state["first"]["id"]
+    record = state["store"].get(sid)
+    record["history"] = [
+        {"role": "user", "content": "legacy"},
+        {"role": "assistant", "content": "legacy reply"},
+    ]
+    state["store"].save(record)
+
+    client = api_server.app.test_client()
+    snapshot = data(client.get(f"/api/history?session_id={sid}"))
+    assert snapshot["history_run_ids"] == [None, None]
+
+    started = data(client.post("/api/chat", json={"session_id": sid, "message": "new"}))
+    assert state["agent"].started.wait(timeout=1)
+    running = data(client.get(f"/api/history?session_id={sid}"))
+    assert running["history_run_ids"] == [None, None, started["run_id"]]
+    state["agent"].release.set()
+    wait_for(lambda: api_server._running_ctx is None)
+    assert state["store"].get(sid)["history_run_ids"] == [
+        None, None, started["run_id"], started["run_id"],
+    ]
+
+
+def test_lost_ack_retry_returns_the_same_run_before_and_after_completion(isolated_server):
+    state = isolated_server
+    client = api_server.app.test_client()
+    sid = state["first"]["id"]
+    payload = {"session_id": sid, "message": "only once", "request_id": "request-1"}
+    started = data(client.post("/api/chat", json=payload))
+    assert state["agent"].started.wait(timeout=1)
+    retry = client.post("/api/chat", json=payload)
+    assert retry.status_code == 200
+    assert data(retry)["run_id"] == started["run_id"]
+    assert data(retry)["status"] == "accepted"
+
+    state["agent"].release.set()
+    wait_for(lambda: api_server._running_ctx is None)
+    # Reload the durable record, rather than relying on an in-memory ACK cache.
+    reloaded = SessionStore(state["store"].directory)
+    api_server._session_stores[str(state["workspace"].resolve())] = reloaded
+    api_server._session_store = reloaded
+    assert data(client.post("/api/chat", json=payload))["run_id"] == started["run_id"]
+    snapshot = data(client.get(f"/api/history?session_id={sid}"))
+    assert snapshot["running"] is False
+    assert snapshot["events"] == []
+    assert snapshot["accepted_requests"]["request-1"] == started["run_id"]
+    history = reloaded.get(sid)["history"]
+    assert [item for item in history if item["role"] == "user"] == [
+        {"role": "user", "content": "only once"},
+    ]
+
+
+def test_concurrent_retries_are_accepted_once_and_payload_changes_are_rejected(isolated_server):
+    sid = isolated_server["first"]["id"]
+    payload = {"session_id": sid, "message": "once", "request_id": "same-request"}
+
+    def submit(_):
+        with api_server.app.test_client() as client:
+            response = client.post("/api/chat", json=payload)
+            return response.status_code, data(response)["run_id"]
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(submit, range(2)))
+    assert [status for status, _ in results] == [200, 200]
+    assert results[0][1] == results[1][1]
+    client = api_server.app.test_client()
+    for change in [{"message": "different"}, {"mode": "manual"}]:
+        assert client.post("/api/chat", json={**payload, **change}).status_code == 409
+
+
+def test_unstarted_run_rolls_back_message_and_request_id(isolated_server, monkeypatch):
+    state = isolated_server
+    sid = state["first"]["id"]
+    payload = {"session_id": sid, "message": "retry safely", "request_id": "retry-start"}
+    client = api_server.app.test_client()
+    active_sid = data(client.post("/api/sessions/new", json={}))["session_id"]
+    with monkeypatch.context() as patch:
+        def fail_start(_thread):
+            raise RuntimeError("cannot create thread")
+        patch.setattr(threading.Thread, "start", fail_start)
+        assert client.post("/api/chat", json=payload).status_code == 500
+    record = state["store"].get(sid)
+    assert record["history"] == []
+    assert "retry-start" not in record.get("requests", {})
+    assert api_server._running_ctx is None
+    assert api_server._active_session_id == active_sid
+    assert client.post("/api/chat", json=payload).status_code == 200
+    assert state["store"].get(sid)["history"] == [
+        {"role": "user", "content": "retry safely"},
+    ]
+
+
+def test_attachment_messages_are_preserved_and_bound_to_the_requested_session(isolated_server):
+    state = isolated_server
+    client = api_server.app.test_client()
+    sid = state["first"]["id"]
+    other = data(client.post("/api/sessions/new", json={}))
+    message = [
+        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "test"}},
+        {"type": "text", "text": "explain this"},
+    ]
+    response = client.post("/api/chat", json={
+        "session_id": sid, "message": message, "request_id": "attachment-1",
+    })
+    assert response.status_code == 200
+    assert data(response)["session_id"] == sid
+    assert state["store"].get(sid)["history"][0]["content"] == message
+    assert data(client.get(f"/api/history?session_id={other['session_id']}"))["history"] == []
+    assert client.post("/api/chat", json={"message": "no owner", "request_id": "x"}).status_code == 400
+    assert client.post("/api/chat", json={"message": [{"type": "text", "text": 5}]}).status_code == 400
+
+
+def test_socket_ack_retry_does_not_announce_a_completed_run_again(isolated_server, monkeypatch):
+    from api import socket_handlers
+
+    emitted = []
+    monkeypatch.setattr(socket_handlers, "emit", lambda name, payload: emitted.append((name, payload)))
+    client = api_server.socketio.test_client(api_server.app)
+    payload = {
+        "session_id": isolated_server["first"]["id"],
+        "message": "socket retry", "request_id": "socket-1",
+    }
+    first = client.emit("send_message", payload, callback=True)
+    assert first["success"] is True
+    isolated_server["agent"].release.set()
+    wait_for(lambda: api_server._running_ctx is None)
+    emitted.clear()
+    retry = client.emit("send_message", payload, callback=True)
+    assert retry["data"]["run_id"] == first["data"]["run_id"]
+    assert retry["data"]["status"] == "accepted"
+    assert all(name != "run_started" for name, _ in emitted)
+    assert client.emit("interrupt", {}, callback=True)["status"] == 400
+    client.disconnect()
 
 
 def test_unknown_history_id_returns_404_without_initialization_side_effect(isolated_server):
@@ -365,12 +596,18 @@ def test_running_session_guards_and_targeted_interrupt_approval(isolated_server,
     interrupted_thread.start()
     wait_for(lambda: "approval-interrupt" in api_server._pending_approvals)
 
-    assert client.post("/api/chat/interrupt", json={"session_id": sid_b}).status_code == 409
+    for missing_target in [{}, {"session_id": sid_a}, {"run_id": run_id}]:
+        assert client.post("/api/chat/interrupt", json=missing_target).status_code == 400
+    assert client.post("/api/chat/interrupt", json={"session_id": sid_b, "run_id": run_id}).status_code == 409
     assert not state["agent"]._interrupt_flag.is_set()
-    assert client.post("/api/chat/interrupt", json={
+    interrupt_response = client.post("/api/chat/interrupt", json={
         "session_id": sid_a,
         "run_id": run_id,
-    }).status_code == 200
+    })
+    assert interrupt_response.status_code == 200
+    assert data(interrupt_response)["status"] == "cancelling"
+    assert data(interrupt_response)["interrupt_requested"] is True
+    assert "interrupted" not in data(interrupt_response)
     assert state["agent"]._interrupt_flag.is_set()
     interrupted_thread.join(timeout=1)
     assert interrupted_approval == [False]

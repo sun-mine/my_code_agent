@@ -1,0 +1,287 @@
+{
+  "benchmark": "code-agent-first-party-repairs",
+  "version": "1.0.0",
+  "manifest_hash": "06013cc9290fa45efc791d30a7a9075ae4c1f549654037dc357248c810def276",
+  "tasks": [
+    {
+      "id": "repair-001-clamp",
+      "split": "dev",
+      "prompt": "Fix clamp(value, low, high). It must return value constrained to inclusive bounds and raise ValueError when low is greater than high. Preserve the tests.",
+      "public_test_command": "python3 -m unittest discover -s tests -q",
+      "files": {
+        "exercise.py": "def clamp(value, low, high):\n    return min(low, max(value, high))\n",
+        "tests/test_public.py": "import unittest\nfrom exercise import clamp\n\nclass ClampTests(unittest.TestCase):\n    def test_above_upper_bound(self):\n        self.assertEqual(clamp(10, 0, 5), 5)\n\nif __name__ == '__main__':\n    unittest.main()\n"
+      },
+      "solution_files": {"exercise.py": "def clamp(value, low, high):\n    if low > high:\n        raise ValueError('low must not exceed high')\n    return max(low, min(value, high))\n"},
+      "acceptance": "import unittest\nfrom exercise import clamp\n\nclass Acceptance(unittest.TestCase):\n    def test_boundaries_and_inside(self):\n        self.assertEqual(clamp(-2, 0, 5), 0)\n        self.assertEqual(clamp(3, 0, 5), 3)\n        self.assertEqual(clamp(5, 0, 5), 5)\n    def test_invalid_bounds(self):\n        with self.assertRaises(ValueError): clamp(1, 2, 1)\n\nif __name__ == '__main__': unittest.main()\n",
+      "task_hash": "0b05c93c92add2cca90b25b7f7a59182b877489cc2313e6c6d3d1735c18de987",
+      "scoring_hash": "d53c94648497e3fcba0c80b2e6f7f4b23cbe217fafddd68a42408ba374ad04d8"
+    },
+    {
+      "id": "repair-002-chunks",
+      "split": "dev",
+      "prompt": "Fix chunks(items, size) so it returns consecutive lists, includes a final short chunk, handles empty input, and raises ValueError for non-positive size. Preserve the tests.",
+      "public_test_command": "python3 -m unittest discover -s tests -q",
+      "files": {
+        "exercise.py": "def chunks(items, size):\n    return [items[i:i + size] for i in range(0, len(items) - size, size)]\n",
+        "tests/test_public.py": "import unittest\nfrom exercise import chunks\n\nclass ChunkTests(unittest.TestCase):\n    def test_keeps_remainder(self):\n        self.assertEqual(chunks([1, 2, 3], 2), [[1, 2], [3]])\n\nif __name__ == '__main__': unittest.main()\n"
+      },
+      "solution_files": {"exercise.py": "def chunks(items, size):\n    if size <= 0:\n        raise ValueError('size must be positive')\n    return [list(items[i:i + size]) for i in range(0, len(items), size)]\n"},
+      "acceptance": "import unittest\nfrom exercise import chunks\n\nclass Acceptance(unittest.TestCase):\n    def test_exact_and_empty(self):\n        self.assertEqual(chunks([1, 2, 3, 4], 2), [[1, 2], [3, 4]])\n        self.assertEqual(chunks([], 3), [])\n    def test_invalid_size(self):\n        for size in (0, -1):\n            with self.assertRaises(ValueError): chunks([1], size)\n\nif __name__ == '__main__': unittest.main()\n",
+      "task_hash": "979edd9cc7b4c92902872859d6c8783e6b2761e81d513f9f8cf3bf0543eab033",
+      "scoring_hash": "e0e84f0cbd9f5dbf65a4b76e1ee0201ad978024bf62665cb51615f2756dbe473"
+    },
+    {
+      "id": "repair-003-dedupe",
+      "split": "dev",
+      "prompt": "Fix dedupe(items) so it removes later equal values while preserving first-seen order. Values may be unhashable. Preserve the tests.",
+      "public_test_command": "python3 -m unittest discover -s tests -q",
+      "files": {
+        "exercise.py": "def dedupe(items):\n    return list(set(items))\n",
+        "tests/test_public.py": "import unittest\nfrom exercise import dedupe\n\nclass DedupeTests(unittest.TestCase):\n    def test_preserves_order(self):\n        self.assertEqual(dedupe([3, 1, 3, 2]), [3, 1, 2])\n\nif __name__ == '__main__': unittest.main()\n"
+      },
+      "solution_files": {"exercise.py": "def dedupe(items):\n    result = []\n    for item in items:\n        if item not in result:\n            result.append(item)\n    return result\n"},
+      "acceptance": "import unittest\nfrom exercise import dedupe\n\nclass Acceptance(unittest.TestCase):\n    def test_unhashable_and_empty(self):\n        self.assertEqual(dedupe([[1], [2], [1]]), [[1], [2]])\n        self.assertEqual(dedupe([]), [])\n    def test_does_not_mutate_input(self):\n        values = [2, 2, 1]\n        dedupe(values)\n        self.assertEqual(values, [2, 2, 1])\n\nif __name__ == '__main__': unittest.main()\n",
+      "task_hash": "11460dfdd16751a15288954e9965f6a5dfe0b0ee5a84df63da077a73330265e1",
+      "scoring_hash": "47c130697087db4981bf5aef55fded7c741b077efbac1d5db162f993f96c7863"
+    },
+    {
+      "id": "repair-004-parse-bool",
+      "split": "dev",
+      "prompt": "Fix parse_bool(value). Accept booleans unchanged and case-insensitive strings true/false, yes/no, on/off, 1/0 with surrounding whitespace. Raise ValueError otherwise. Preserve the tests.",
+      "public_test_command": "python3 -m unittest discover -s tests -q",
+      "files": {
+        "exercise.py": "def parse_bool(value):\n    return value in ('true', 'yes', '1')\n",
+        "tests/test_public.py": "import unittest\nfrom exercise import parse_bool\n\nclass ParseBoolTests(unittest.TestCase):\n    def test_case_and_whitespace(self):\n        self.assertTrue(parse_bool(' YES '))\n\nif __name__ == '__main__': unittest.main()\n"
+      },
+      "solution_files": {"exercise.py": "def parse_bool(value):\n    if isinstance(value, bool):\n        return value\n    if isinstance(value, str):\n        normalized = value.strip().lower()\n        if normalized in {'true', 'yes', 'on', '1'}:\n            return True\n        if normalized in {'false', 'no', 'off', '0'}:\n            return False\n    raise ValueError('invalid boolean')\n"},
+      "acceptance": "import unittest\nfrom exercise import parse_bool\n\nclass Acceptance(unittest.TestCase):\n    def test_false_values_and_bool(self):\n        for value in (' FALSE ', 'No', 'off', '0'):\n            self.assertFalse(parse_bool(value))\n        self.assertIs(parse_bool(True), True)\n    def test_invalid(self):\n        for value in ('', 'maybe', 1, None):\n            with self.assertRaises(ValueError): parse_bool(value)\n\nif __name__ == '__main__': unittest.main()\n",
+      "task_hash": "7c69122f53d8c717e2a782a3711a2b9084d9370804b7aad35b8975bdb749a4a1",
+      "scoring_hash": "6358d6a3f263bae3c16be4b9f9bec91f355e7e3f57aca1adb11f1c201f756410"
+    },
+    {
+      "id": "repair-005-merge-counts",
+      "split": "dev",
+      "prompt": "Fix merge_counts(left, right) so overlapping keys are summed, unique keys are retained, and neither input mapping is mutated. Preserve the tests.",
+      "public_test_command": "python3 -m unittest discover -s tests -q",
+      "files": {
+        "exercise.py": "def merge_counts(left, right):\n    result = dict(left)\n    result.update(right)\n    return result\n",
+        "tests/test_public.py": "import unittest\nfrom exercise import merge_counts\n\nclass MergeCountsTests(unittest.TestCase):\n    def test_sums_overlap(self):\n        self.assertEqual(merge_counts({'a': 2}, {'a': 3}), {'a': 5})\n\nif __name__ == '__main__': unittest.main()\n"
+      },
+      "solution_files": {"exercise.py": "def merge_counts(left, right):\n    result = dict(left)\n    for key, count in right.items():\n        result[key] = result.get(key, 0) + count\n    return result\n"},
+      "acceptance": "import unittest\nfrom exercise import merge_counts\n\nclass Acceptance(unittest.TestCase):\n    def test_unique_and_unchanged(self):\n        left, right = {'a': 1, 'b': 2}, {'b': 4, 'c': 8}\n        self.assertEqual(merge_counts(left, right), {'a': 1, 'b': 6, 'c': 8})\n        self.assertEqual(left, {'a': 1, 'b': 2})\n        self.assertEqual(right, {'b': 4, 'c': 8})\n\nif __name__ == '__main__': unittest.main()\n",
+      "task_hash": "9fa14305747429dab9ccc1e66acc5b17e23067e6d0bfcf313b285aa4ca6f6667",
+      "scoring_hash": "fcf2c373e7539afe9887d00ac7e42d0a14bd1c390968ecc3ba134455c6130387"
+    },
+    {
+      "id": "repair-006-backoff",
+      "split": "dev",
+      "prompt": "Fix backoff_delays(attempts, base=1, factor=2). Return one delay per attempt beginning with base, and raise ValueError when attempts is negative. Preserve the tests.",
+      "public_test_command": "python3 -m unittest discover -s tests -q",
+      "files": {
+        "exercise.py": "def backoff_delays(attempts, base=1, factor=2):\n    return [base * factor ** n for n in range(1, attempts + 1)]\n",
+        "tests/test_public.py": "import unittest\nfrom exercise import backoff_delays\n\nclass BackoffTests(unittest.TestCase):\n    def test_begins_with_base(self):\n        self.assertEqual(backoff_delays(3), [1, 2, 4])\n\nif __name__ == '__main__': unittest.main()\n"
+      },
+      "solution_files": {"exercise.py": "def backoff_delays(attempts, base=1, factor=2):\n    if attempts < 0:\n        raise ValueError('attempts must not be negative')\n    return [base * factor ** n for n in range(attempts)]\n"},
+      "acceptance": "import unittest\nfrom exercise import backoff_delays\n\nclass Acceptance(unittest.TestCase):\n    def test_custom_and_zero(self):\n        self.assertEqual(backoff_delays(4, base=0.5, factor=3), [0.5, 1.5, 4.5, 13.5])\n        self.assertEqual(backoff_delays(0), [])\n    def test_negative(self):\n        with self.assertRaises(ValueError): backoff_delays(-1)\n\nif __name__ == '__main__': unittest.main()\n",
+      "task_hash": "490f02a57d306a1d4af2e64625224226f6d8d8134453e985366dbb9e6604a7e4",
+      "scoring_hash": "adfd384e5bc311b98bd452bc9ccca381bb6c91ae2718bd2d9d9bfc55ec68df65"
+    },
+    {
+      "id": "repair-007-normalize-tags",
+      "split": "dev",
+      "prompt": "Fix normalize_tags(tags) so it strips and lowercases tags, drops blank values, and removes duplicates while preserving first-seen order. Preserve the tests.",
+      "public_test_command": "python3 -m unittest discover -s tests -q",
+      "files": {
+        "exercise.py": "def normalize_tags(tags):\n    return sorted({tag.lower() for tag in tags})\n",
+        "tests/test_public.py": "import unittest\nfrom exercise import normalize_tags\n\nclass NormalizeTagTests(unittest.TestCase):\n    def test_order_and_spacing(self):\n        self.assertEqual(normalize_tags([' Z ', 'a', 'z']), ['z', 'a'])\n\nif __name__ == '__main__': unittest.main()\n"
+      },
+      "solution_files": {"exercise.py": "def normalize_tags(tags):\n    result = []\n    for tag in tags:\n        normalized = tag.strip().lower()\n        if normalized and normalized not in result:\n            result.append(normalized)\n    return result\n"},
+      "acceptance": "import unittest\nfrom exercise import normalize_tags\n\nclass Acceptance(unittest.TestCase):\n    def test_blanks_and_duplicates(self):\n        self.assertEqual(normalize_tags(['', ' Blue', ' ', 'BLUE ', 'red']), ['blue', 'red'])\n        self.assertEqual(normalize_tags([]), [])\n\nif __name__ == '__main__': unittest.main()\n",
+      "task_hash": "9ae9f00bc1d8b9a61f37e664271add04e5274b6230c7a547026fa8e3262183a9",
+      "scoring_hash": "37a294ce3da9fee0667f8bb59c02ab57650b6363da3587d69c39f6e1eaced4d3"
+    },
+    {
+      "id": "repair-008-moving-average",
+      "split": "dev",
+      "prompt": "Fix moving_average(values, window) so every complete window is included and invalid non-positive windows raise ValueError. A window larger than the input returns an empty list. Preserve the tests.",
+      "public_test_command": "python3 -m unittest discover -s tests -q",
+      "files": {
+        "exercise.py": "def moving_average(values, window):\n    return [sum(values[i:i + window]) / window for i in range(len(values) - window)]\n",
+        "tests/test_public.py": "import unittest\nfrom exercise import moving_average\n\nclass MovingAverageTests(unittest.TestCase):\n    def test_includes_last_window(self):\n        self.assertEqual(moving_average([1, 3, 5, 7], 2), [2, 4, 6])\n\nif __name__ == '__main__': unittest.main()\n"
+      },
+      "solution_files": {"exercise.py": "def moving_average(values, window):\n    if window <= 0:\n        raise ValueError('window must be positive')\n    return [sum(values[i:i + window]) / window for i in range(len(values) - window + 1)]\n"},
+      "acceptance": "import unittest\nfrom exercise import moving_average\n\nclass Acceptance(unittest.TestCase):\n    def test_edge_windows(self):\n        self.assertEqual(moving_average([2, 4], 1), [2, 4])\n        self.assertEqual(moving_average([2], 2), [])\n    def test_invalid(self):\n        with self.assertRaises(ValueError): moving_average([1], 0)\n\nif __name__ == '__main__': unittest.main()\n",
+      "task_hash": "66034ec5da2db5b6bc596067f566e67ac68a05677c606d0a8d9917fa874b15b4",
+      "scoring_hash": "87abf97fe1c460842d42d0eb5cc58f20de2391adaf95f7f43c182ac139ede5b3"
+    },
+    {
+      "id": "repair-009-top-k",
+      "split": "dev",
+      "prompt": "Fix top_k(items, k), where items are (name, score) pairs. Return up to k pairs by descending score while keeping original order for ties. Non-positive k returns an empty list. Preserve the tests.",
+      "public_test_command": "python3 -m unittest discover -s tests -q",
+      "files": {
+        "exercise.py": "def top_k(items, k):\n    return sorted(items, reverse=True)[:k]\n",
+        "tests/test_public.py": "import unittest\nfrom exercise import top_k\n\nclass TopKTests(unittest.TestCase):\n    def test_sorts_by_score(self):\n        self.assertEqual(top_k([('z', 1), ('a', 3)], 1), [('a', 3)])\n\nif __name__ == '__main__': unittest.main()\n"
+      },
+      "solution_files": {"exercise.py": "def top_k(items, k):\n    if k <= 0:\n        return []\n    return sorted(items, key=lambda item: item[1], reverse=True)[:k]\n"},
+      "acceptance": "import unittest\nfrom exercise import top_k\n\nclass Acceptance(unittest.TestCase):\n    def test_stable_ties_and_limits(self):\n        items = [('first', 2), ('high', 5), ('second', 2)]\n        self.assertEqual(top_k(items, 3), [('high', 5), ('first', 2), ('second', 2)])\n        self.assertEqual(top_k(items, 0), [])\n        self.assertEqual(top_k(items, 10), [('high', 5), ('first', 2), ('second', 2)])\n\nif __name__ == '__main__': unittest.main()\n",
+      "task_hash": "3db4abdec7d6bb533e7016e4a0f91ddc52e9a96890db94cd978d033bb548cdea",
+      "scoring_hash": "ffdb35aa33f83fb0c74cc1d7f3b82f2c405e7b7faab6fa921c8b7c7f2997288a"
+    },
+    {
+      "id": "repair-010-mask-email",
+      "split": "dev",
+      "prompt": "Fix mask_email(address). For a valid single-@ address, strip surrounding whitespace and replace the local part after its first character with exactly three asterisks. Raise ValueError for missing local or domain parts. Preserve the tests.",
+      "public_test_command": "python3 -m unittest discover -s tests -q",
+      "files": {
+        "exercise.py": "def mask_email(address):\n    local, domain = address.split('@')\n    return local + '***@' + domain\n",
+        "tests/test_public.py": "import unittest\nfrom exercise import mask_email\n\nclass MaskEmailTests(unittest.TestCase):\n    def test_hides_local_part(self):\n        self.assertEqual(mask_email('alice@example.com'), 'a***@example.com')\n\nif __name__ == '__main__': unittest.main()\n"
+      },
+      "solution_files": {"exercise.py": "def mask_email(address):\n    value = address.strip()\n    if value.count('@') != 1:\n        raise ValueError('invalid email')\n    local, domain = value.split('@')\n    if not local or not domain:\n        raise ValueError('invalid email')\n    return local[0] + '***@' + domain\n"},
+      "acceptance": "import unittest\nfrom exercise import mask_email\n\nclass Acceptance(unittest.TestCase):\n    def test_spacing_and_short_local(self):\n        self.assertEqual(mask_email(' x@host.test '), 'x***@host.test')\n    def test_invalid(self):\n        for value in ('missing', '@host', 'x@', 'a@b@c'):\n            with self.assertRaises(ValueError): mask_email(value)\n\nif __name__ == '__main__': unittest.main()\n",
+      "task_hash": "834efcafbe0b11de3fc8596bbc88985e0d8ad0f8a9769f6d643a02f8ead3d12f",
+      "scoring_hash": "a65dfb37b2d73ea529eac4c47f9fb25e3aeee416e88c5354813eb6fe45063c98"
+    },
+    {
+      "id": "repair-011-parse-duration",
+      "split": "dev",
+      "prompt": "Fix parse_duration(value) to parse a non-empty sequence of integer h, m, and s components such as 1h30m or 2m5s into total seconds. Reject malformed text with ValueError. Preserve the tests.",
+      "public_test_command": "python3 -m unittest discover -s tests -q",
+      "files": {
+        "exercise.py": "def parse_duration(value):\n    units = {'h': 3600, 'm': 60, 's': 1}\n    return int(value[:-1]) * units[value[-1]]\n",
+        "tests/test_public.py": "import unittest\nfrom exercise import parse_duration\n\nclass DurationTests(unittest.TestCase):\n    def test_compound(self):\n        self.assertEqual(parse_duration('1h30m'), 5400)\n\nif __name__ == '__main__': unittest.main()\n"
+      },
+      "solution_files": {"exercise.py": "import re\n\ndef parse_duration(value):\n    if not isinstance(value, str) or not value:\n        raise ValueError('invalid duration')\n    position = 0\n    total = 0\n    for match in re.finditer(r'(\\d+)([hms])', value):\n        if match.start() != position:\n            raise ValueError('invalid duration')\n        total += int(match.group(1)) * {'h': 3600, 'm': 60, 's': 1}[match.group(2)]\n        position = match.end()\n    if position != len(value):\n        raise ValueError('invalid duration')\n    return total\n"},
+      "acceptance": "import unittest\nfrom exercise import parse_duration\n\nclass Acceptance(unittest.TestCase):\n    def test_components(self):\n        self.assertEqual(parse_duration('45s'), 45)\n        self.assertEqual(parse_duration('2m5s'), 125)\n        self.assertEqual(parse_duration('1h2m3s'), 3723)\n    def test_invalid(self):\n        for value in ('', '1x', 'm', '-1s', '1h!2m', None):\n            with self.assertRaises((ValueError, TypeError)): parse_duration(value)\n\nif __name__ == '__main__': unittest.main()\n",
+      "task_hash": "08eb207fe8f0c96bfbf3bb588ab28ed3ba1ac7a529c48dab7d64738dd2ec3d6e",
+      "scoring_hash": "3c936fcb635e64445ef970d0c327c359d0644ef7cc65b02fb720ca1350e15b89"
+    },
+    {
+      "id": "repair-012-flatten-one",
+      "split": "dev",
+      "prompt": "Fix flatten_one(items) to flatten exactly one level of nested lists or tuples. Deeper containers and strings must remain values. Preserve the tests.",
+      "public_test_command": "python3 -m unittest discover -s tests -q",
+      "files": {
+        "exercise.py": "def flatten_one(items):\n    result = []\n    for item in items:\n        if isinstance(item, (list, tuple)):\n            result.extend(flatten_one(item))\n        else:\n            result.append(item)\n    return result\n",
+        "tests/test_public.py": "import unittest\nfrom exercise import flatten_one\n\nclass FlattenTests(unittest.TestCase):\n    def test_only_one_level(self):\n        self.assertEqual(flatten_one([[1, [2]], 3]), [1, [2], 3])\n\nif __name__ == '__main__': unittest.main()\n"
+      },
+      "solution_files": {"exercise.py": "def flatten_one(items):\n    result = []\n    for item in items:\n        if isinstance(item, (list, tuple)):\n            result.extend(item)\n        else:\n            result.append(item)\n    return result\n"},
+      "acceptance": "import unittest\nfrom exercise import flatten_one\n\nclass Acceptance(unittest.TestCase):\n    def test_tuple_string_and_empty(self):\n        self.assertEqual(flatten_one([(1, 2), 'ab', [[3]]]), [1, 2, 'ab', [3]])\n        self.assertEqual(flatten_one([]), [])\n\nif __name__ == '__main__': unittest.main()\n",
+      "task_hash": "c6b8ed068831049f89a2c565c8543630b488c30ae9b40eaf3abcc1805ce99b6c",
+      "scoring_hash": "f934a9441925c545171b4aa0d0bda5b5a204f3c79ae7d5ff663f8bf52fbe879c"
+    },
+    {
+      "id": "repair-013-page",
+      "split": "heldout",
+      "prompt": "Fix page(items, number, size). Page numbers are one-based; return that page as a list and raise ValueError unless number and size are positive. Preserve the tests.",
+      "public_test_command": "python3 -m unittest discover -s tests -q",
+      "files": {
+        "exercise.py": "def page(items, number, size):\n    start = number * size\n    return items[start:start + size]\n",
+        "tests/test_public.py": "import unittest\nfrom exercise import page\n\nclass PageTests(unittest.TestCase):\n    def test_first_page(self):\n        self.assertEqual(page([1, 2, 3], 1, 2), [1, 2])\n\nif __name__ == '__main__': unittest.main()\n"
+      },
+      "solution_files": {"exercise.py": "def page(items, number, size):\n    if number <= 0 or size <= 0:\n        raise ValueError('number and size must be positive')\n    start = (number - 1) * size\n    return list(items[start:start + size])\n"},
+      "acceptance": "import unittest\nfrom exercise import page\n\nclass Acceptance(unittest.TestCase):\n    def test_later_and_past_end(self):\n        self.assertEqual(page([1, 2, 3, 4, 5], 2, 2), [3, 4])\n        self.assertEqual(page([1], 3, 2), [])\n    def test_invalid(self):\n        for args in ((0, 1), (1, 0), (-1, 2)):\n            with self.assertRaises(ValueError): page([1], *args)\n\nif __name__ == '__main__': unittest.main()\n",
+      "task_hash": "93df14a357ed3112f636ab1ec00fa8b3b1319559bc92124489915fbbc32c42ef",
+      "scoring_hash": "6831e72788cc8b2a56dfa55db3a59ddafe9502d4924608ec231633d95dc9be2a"
+    },
+    {
+      "id": "repair-014-group-by",
+      "split": "heldout",
+      "prompt": "Fix group_by(items, key) so every item is appended to the list for its computed key, preserving item and first-key order. Preserve the tests.",
+      "public_test_command": "python3 -m unittest discover -s tests -q",
+      "files": {
+        "exercise.py": "def group_by(items, key):\n    groups = {}\n    for item in items:\n        groups[key(item)] = [item]\n    return groups\n",
+        "tests/test_public.py": "import unittest\nfrom exercise import group_by\n\nclass GroupByTests(unittest.TestCase):\n    def test_keeps_all_items(self):\n        self.assertEqual(group_by([1, 3, 2], lambda x: x % 2), {1: [1, 3], 0: [2]})\n\nif __name__ == '__main__': unittest.main()\n"
+      },
+      "solution_files": {"exercise.py": "def group_by(items, key):\n    groups = {}\n    for item in items:\n        groups.setdefault(key(item), []).append(item)\n    return groups\n"},
+      "acceptance": "import unittest\nfrom exercise import group_by\n\nclass Acceptance(unittest.TestCase):\n    def test_strings_and_empty(self):\n        self.assertEqual(group_by(['ant', 'ape', 'bat'], lambda x: x[0]), {'a': ['ant', 'ape'], 'b': ['bat']})\n        self.assertEqual(group_by([], len), {})\n\nif __name__ == '__main__': unittest.main()\n",
+      "task_hash": "5543d08b594b420768703beb75a530b50264ce8559dad14b7e065aa29805259b",
+      "scoring_hash": "cb0232322838b65df7190ac9161e3452d7a829a8a48ef76c1aa181167ea0bb3b"
+    },
+    {
+      "id": "repair-015-encode-query",
+      "split": "heldout",
+      "prompt": "Fix encode_query(pairs) for an ordered sequence of (name, value) pairs. Percent-encode values using standard form encoding and expand list values as repeated keys. Preserve the tests.",
+      "public_test_command": "python3 -m unittest discover -s tests -q",
+      "files": {
+        "exercise.py": "def encode_query(pairs):\n    return '&'.join(f'{key}={value}' for key, value in pairs)\n",
+        "tests/test_public.py": "import unittest\nfrom exercise import encode_query\n\nclass QueryTests(unittest.TestCase):\n    def test_escapes_values(self):\n        self.assertEqual(encode_query([('q', 'a & b')]), 'q=a+%26+b')\n\nif __name__ == '__main__': unittest.main()\n"
+      },
+      "solution_files": {"exercise.py": "from urllib.parse import urlencode\n\ndef encode_query(pairs):\n    return urlencode(pairs, doseq=True)\n"},
+      "acceptance": "import unittest\nfrom exercise import encode_query\n\nclass Acceptance(unittest.TestCase):\n    def test_repeated_and_ordered(self):\n        self.assertEqual(encode_query([('tag', ['a', 'b']), ('page', 2)]), 'tag=a&tag=b&page=2')\n        self.assertEqual(encode_query([]), '')\n    def test_unicode(self):\n        self.assertEqual(encode_query([('q', '心')]), 'q=%E5%BF%83')\n\nif __name__ == '__main__': unittest.main()\n",
+      "task_hash": "8e689333a5ea365b95c5d3b226a6d67219cb2683a4bb89f3be0016899be752fd",
+      "scoring_hash": "76407659254bab25e2121d75f88d7b95da913468856ea20ee09d90fc09e77fd3"
+    },
+    {
+      "id": "repair-016-parse-csv-line",
+      "split": "heldout",
+      "prompt": "Fix parse_csv_line(line) so it follows Python CSV quoting rules and returns exactly one record as a list. Preserve the tests.",
+      "public_test_command": "python3 -m unittest discover -s tests -q",
+      "files": {
+        "exercise.py": "def parse_csv_line(line):\n    return line.split(',')\n",
+        "tests/test_public.py": "import unittest\nfrom exercise import parse_csv_line\n\nclass CsvTests(unittest.TestCase):\n    def test_quoted_comma(self):\n        self.assertEqual(parse_csv_line('a,\"b,c\"'), ['a', 'b,c'])\n\nif __name__ == '__main__': unittest.main()\n"
+      },
+      "solution_files": {"exercise.py": "import csv\n\ndef parse_csv_line(line):\n    return next(csv.reader([line]))\n"},
+      "acceptance": "import unittest\nfrom exercise import parse_csv_line\n\nclass Acceptance(unittest.TestCase):\n    def test_escaped_quote_and_empty_field(self):\n        self.assertEqual(parse_csv_line('\"a\"\"b\",,c'), ['a\"b', '', 'c'])\n        self.assertEqual(parse_csv_line(''), [])\n\nif __name__ == '__main__': unittest.main()\n",
+      "task_hash": "b5806f52484bbd89d35136ea255bbd9195b3390af2094cd69cfee38553f0f1a8",
+      "scoring_hash": "a7892f401c08bb63900bee2d021b8784fd901917cf7a338517de78f90fe4b66f"
+    },
+    {
+      "id": "repair-017-interleave",
+      "split": "heldout",
+      "prompt": "Fix interleave(left, right) so values alternate starting with left and any remaining tail from the longer input is retained. Return a list. Preserve the tests.",
+      "public_test_command": "python3 -m unittest discover -s tests -q",
+      "files": {
+        "exercise.py": "def interleave(left, right):\n    return [value for pair in zip(left, right) for value in pair]\n",
+        "tests/test_public.py": "import unittest\nfrom exercise import interleave\n\nclass InterleaveTests(unittest.TestCase):\n    def test_retains_tail(self):\n        self.assertEqual(interleave([1, 2, 3], ['a']), [1, 'a', 2, 3])\n\nif __name__ == '__main__': unittest.main()\n"
+      },
+      "solution_files": {"exercise.py": "from itertools import zip_longest\n\ndef interleave(left, right):\n    sentinel = object()\n    result = []\n    for pair in zip_longest(left, right, fillvalue=sentinel):\n        result.extend(value for value in pair if value is not sentinel)\n    return result\n"},
+      "acceptance": "import unittest\nfrom exercise import interleave\n\nclass Acceptance(unittest.TestCase):\n    def test_right_tail_and_empty(self):\n        self.assertEqual(interleave([1], ['a', 'b', 'c']), [1, 'a', 'b', 'c'])\n        self.assertEqual(interleave([], []), [])\n        self.assertEqual(interleave([], [None]), [None])\n\nif __name__ == '__main__': unittest.main()\n",
+      "task_hash": "adbdf5b01d2a2e42854ad3f9ca9b47c9192b8b3a09ffc44fa28e7cb9a6402152",
+      "scoring_hash": "fb1ce02722a6ed158cfec3023bcf9e56cb6249e3ba37253de343e81982e7fa24"
+    },
+    {
+      "id": "repair-018-merge-intervals",
+      "split": "heldout",
+      "prompt": "Fix merge_intervals(intervals) for inclusive (start, end) pairs. Sort by start and merge overlapping or touching intervals without mutating the input. Preserve the tests.",
+      "public_test_command": "python3 -m unittest discover -s tests -q",
+      "files": {
+        "exercise.py": "def merge_intervals(intervals):\n    return sorted(intervals)\n",
+        "tests/test_public.py": "import unittest\nfrom exercise import merge_intervals\n\nclass IntervalTests(unittest.TestCase):\n    def test_merges_overlap(self):\n        self.assertEqual(merge_intervals([(1, 3), (2, 5)]), [(1, 5)])\n\nif __name__ == '__main__': unittest.main()\n"
+      },
+      "solution_files": {"exercise.py": "def merge_intervals(intervals):\n    merged = []\n    for start, end in sorted(intervals):\n        if not merged or start > merged[-1][1] + 1:\n            merged.append((start, end))\n        else:\n            merged[-1] = (merged[-1][0], max(merged[-1][1], end))\n    return merged\n"},
+      "acceptance": "import unittest\nfrom exercise import merge_intervals\n\nclass Acceptance(unittest.TestCase):\n    def test_touching_nested_and_disjoint(self):\n        source = [(8, 9), (1, 2), (3, 5), (2, 4)]\n        self.assertEqual(merge_intervals(source), [(1, 5), (8, 9)])\n        self.assertEqual(source, [(8, 9), (1, 2), (3, 5), (2, 4)])\n        self.assertEqual(merge_intervals([]), [])\n\nif __name__ == '__main__': unittest.main()\n",
+      "task_hash": "e852e000bd77f9299939a366cac19485f95e898f29d9314ebe74e5e55c72a15d",
+      "scoring_hash": "c2789111623a7e74115cfd5212fd748162c172adb578daeece5c2a5b6949d312"
+    },
+    {
+      "id": "repair-019-rotate-right",
+      "split": "heldout",
+      "prompt": "Fix rotate_right(items, amount) to return a new list rotated right. Support amounts larger than the input and negative amounts; empty input returns an empty list. Preserve the tests.",
+      "public_test_command": "python3 -m unittest discover -s tests -q",
+      "files": {
+        "exercise.py": "def rotate_right(items, amount):\n    return items[amount:] + items[:amount]\n",
+        "tests/test_public.py": "import unittest\nfrom exercise import rotate_right\n\nclass RotateTests(unittest.TestCase):\n    def test_rotates_right(self):\n        self.assertEqual(rotate_right([1, 2, 3, 4], 1), [4, 1, 2, 3])\n\nif __name__ == '__main__': unittest.main()\n"
+      },
+      "solution_files": {"exercise.py": "def rotate_right(items, amount):\n    values = list(items)\n    if not values:\n        return []\n    amount %= len(values)\n    return values[-amount:] + values[:-amount] if amount else values\n"},
+      "acceptance": "import unittest\nfrom exercise import rotate_right\n\nclass Acceptance(unittest.TestCase):\n    def test_large_negative_and_empty(self):\n        self.assertEqual(rotate_right([1, 2, 3], 4), [3, 1, 2])\n        self.assertEqual(rotate_right([1, 2, 3], -1), [2, 3, 1])\n        self.assertEqual(rotate_right([], 5), [])\n\nif __name__ == '__main__': unittest.main()\n",
+      "task_hash": "7e711b1e8e6b075081241f6cb45f079c6de0105482fb19de7df0a3e10c0ef5ee",
+      "scoring_hash": "624a378118026049dbff9c7c228bbd6d1d6fcbd1fc4a4d705c2710c6e2fc1866"
+    },
+    {
+      "id": "repair-020-compare-versions",
+      "split": "heldout",
+      "prompt": "Fix compare_versions(left, right) for dot-separated non-negative integer versions. Missing trailing components equal zero. Return -1, 0, or 1 and raise ValueError for invalid text. Preserve the tests.",
+      "public_test_command": "python3 -m unittest discover -s tests -q",
+      "files": {
+        "exercise.py": "def compare_versions(left, right):\n    return (left > right) - (left < right)\n",
+        "tests/test_public.py": "import unittest\nfrom exercise import compare_versions\n\nclass VersionTests(unittest.TestCase):\n    def test_numeric_order(self):\n        self.assertEqual(compare_versions('1.10', '1.2'), 1)\n\nif __name__ == '__main__': unittest.main()\n"
+      },
+      "solution_files": {"exercise.py": "def _parts(value):\n    if not isinstance(value, str) or not value or any(not part.isdigit() for part in value.split('.')):\n        raise ValueError('invalid version')\n    parts = [int(part) for part in value.split('.')]\n    while parts and parts[-1] == 0:\n        parts.pop()\n    return parts\n\ndef compare_versions(left, right):\n    left_parts, right_parts = _parts(left), _parts(right)\n    return (left_parts > right_parts) - (left_parts < right_parts)\n"},
+      "acceptance": "import unittest\nfrom exercise import compare_versions\n\nclass Acceptance(unittest.TestCase):\n    def test_equal_missing_components_and_less(self):\n        self.assertEqual(compare_versions('1.0.0', '1'), 0)\n        self.assertEqual(compare_versions('2.0.1', '2.1'), -1)\n        self.assertEqual(compare_versions('3', '2.9.9'), 1)\n    def test_invalid(self):\n        for value in ('', '1.a', '1..2', '-1'):\n            with self.assertRaises(ValueError): compare_versions(value, '1')\n\nif __name__ == '__main__': unittest.main()\n",
+      "task_hash": "60365612d05c8e7a510214e31a39511f570fdb489ab8c9ff947a94b303a0d86f",
+      "scoring_hash": "339dd9147489c383b0a36d8aa9f95b9805a90bb6119c44f84ffbbdaf7e194ddd"
+    }
+  ]
+}

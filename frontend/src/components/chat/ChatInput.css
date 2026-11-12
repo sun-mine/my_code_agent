@@ -11,12 +11,17 @@
 .composer-tool-button { width:32px; padding:0; }
 .composer-mode-button { border-color:var(--border); }
 .composer-tool-button:hover,.composer-model-button:hover,.composer-mode-button:hover,.composer-stop:hover { background:var(--bg-raised); color:var(--text-1); }
+.composer-model-button:disabled { opacity:.6; cursor:not-allowed; }
 .composer-model-button { max-width:240px; min-width:0; }
 .composer-model-button span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .composer-send { width:34px; height:34px; display:grid; place-items:center; flex-shrink:0; border:0; border-radius:10px; color:var(--on-accent); background:var(--accent); cursor:pointer; transition:background .15s,transform .15s; }
 .composer-send:hover:not(:disabled) { background:var(--accent-2); transform:translateY(-1px); }
 .composer-send:disabled { color:var(--text-3); background:var(--bg-raised); cursor:not-allowed; }
 .composer-stop { border-color:var(--border-hi); }
+.composer-stop:disabled { opacity:.65; cursor:not-allowed; }
+.composer-queue { display:flex; align-items:center; justify-content:flex-end; gap:8px; margin:8px 4px -3px; color:var(--text-3); font-size:11px; }
+.composer-queue.is-error { color:var(--red); }
+.composer-queue button { padding:2px 7px; border:1px solid var(--border); border-radius:5px; background:var(--bg-raised); color:inherit; font:inherit; cursor:pointer; }
 .composer-menu { position:absolute; bottom:calc(100% + 10px); z-index:101; padding:6px; border:1px solid var(--border-hi); border-radius:12px; background:var(--bg-overlay); box-shadow:var(--shadow-lg); max-height:300px; overflow:auto; }
 .composer-mode-menu { right:0; width:280px; max-width:calc(100vw - 56px); }
 .composer-model-menu { left:0; width:260px; max-width:calc(100vw - 96px); }
@@ -24,12 +29,19 @@
 .composer-menu-title { margin:0; padding:6px 8px 9px; font-size:10px; color:var(--text-3); }
 .composer-menu-item { display:flex; align-items:center; gap:8px; width:100%; padding:9px 8px; border:0; border-radius:7px; background:transparent; color:var(--text-2); font:inherit; font-size:12px; text-align:left; cursor:pointer; }
 .composer-menu-item:hover,.composer-menu-item.is-selected { background:var(--bg-raised); color:var(--text-1); }
+.composer-menu-item:disabled { cursor:not-allowed; }
+.composer-menu-item.is-unconfigured { color:var(--text-3); opacity:.65; }
+.composer-menu-item.is-unconfigured:hover { background:transparent; color:var(--text-3); }
 .composer-menu-item > svg { flex-shrink:0; }
 .composer-option-copy { display:flex; flex-direction:column; gap:3px; min-width:0; }
 .composer-option-copy strong { font-size:12px; font-weight:550; }
 .composer-option-copy small { color:var(--text-3); font-size:10px; line-height:1.6; }
 .composer-option-check { display:block; width:12px; flex:0 0 12px; }
-.composer-provider { margin-left:auto; color:var(--text-3); font-size:10px; }
+.composer-provider { display:flex; align-items:center; gap:5px; margin-left:auto; color:var(--text-3); font-size:10px; }
+.composer-provider small { font-size:9px; white-space:nowrap; }
+.composer-model-error { display:flex; align-items:center; justify-content:flex-end; gap:6px; margin:8px 4px -3px; color:var(--red); font-size:11px; }
+.composer-model-error button { display:grid; place-items:center; width:20px; height:20px; padding:0; border:0; border-radius:5px; background:transparent; color:inherit; cursor:pointer; }
+.composer-model-error button:hover { background:var(--bg-raised); }
 .composer-footer { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:11px 4px 0; color:var(--text-3); font-size:10px; }
 .composer-connection { display:flex; align-items:center; gap:5px; }
 .composer-connection i { display:block; width:5px; height:5px; border-radius:50%; background:var(--green); }

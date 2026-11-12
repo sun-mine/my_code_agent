@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "observed_on": "2026-11-03",
+  "run_kind": "live local-model smoke comparison",
+  "sample": {
+    "provenance": "first-party synthetic repair tasks",
+    "task_count": 2,
+    "task_ids": [
+      "repair-001-clamp",
+      "repair-013-page"
+    ],
+    "splits": [
+      "dev",
+      "heldout"
+    ],
+    "real_repository_evaluation": false,
+    "overall_capability_claim": false,
+    "pilot_run_included": false
+  },
+  "manifest": {
+    "version": "1.0.0",
+    "sha256": "06013cc9290fa45efc791d30a7a9075ae4c1f549654037dc357248c810def276"
+  },
+  "model": {
+    "name": "qwen2.5:3b",
+    "provider": "Ollama on a user-owned machine",
+    "digest": "357c53fb659c5076de1d65ccb0b397446227b71a42be9d1603d46168015c9e4b",
+    "format": "gguf",
+    "family": "qwen2",
+    "parameter_size": "3.1B",
+    "quantization_level": "Q4_K_M",
+    "context_length": 32768,
+    "embedding_length": 2048,
+    "runner": "ggml",
+    "capabilities": [
+      "completion",
+      "tools"
+    ]
+  },
+  "transport": {
+    "protocol": "Anthropic-compatible HTTP",
+    "endpoint": "http://127.0.0.1:11435",
+    "route": "SSH forwarding to the user-owned Ollama host"
+  },
+  "profiles": [
+    "baseline",
+    "retrieval",
+    "repair"
+  ],
+  "budget_per_task": {
+    "max_rounds": 10,
+    "max_tool_calls": 20,
+    "max_seconds": 60.0,
+    "max_tokens": 20000,
+    "max_repair_attempts": 2
+  },
+  "scoring": {
+    "completion_rule": "frozen public tests and externally injected acceptance tests pass, with protected tests unchanged",
+    "agent_outcome_reported_separately": true,
+    "human_intervention_count": 0
+  },
+  "aggregate_results": {
+    "baseline": {
+      "patches_accepted": 0,
+      "tasks": 2
+    },
+    "retrieval": {
+      "patches_accepted": 0,
+      "tasks": 2
+    },
+    "repair": {
+      "patches_accepted": 0,
+      "tasks": 2
+    }
+  },
+  "code_snapshot": {
+    "git_head": "87321207d97165f4b46db4c7809dbc61ffa4dc91",
+    "working_tree_dirty": true,
+    "source_hashes": "source-hashes.json",
+    "note": "The evaluated source had uncommitted changes; the Git commit alone cannot reproduce this run."
+  },
+  "runtime": {
+    "python": "3.12.13",
+    "anthropic": "2.4.0",
+    "platform": "Darwin",
+    "architecture": "arm64"
+  }
+}

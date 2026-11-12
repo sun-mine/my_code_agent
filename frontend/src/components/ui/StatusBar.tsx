@@ -5,7 +5,7 @@ import { STATUS_LABEL } from '../../lib/utils'
 
 interface StatusBarProps {
   socketStatus: SocketStatus
-  agentState: 'idle' | 'thinking' | 'executing_tool'
+  agentState: 'idle' | 'thinking' | 'executing_tool' | 'reviewing' | 'cancelling'
   workdir?: string
   workdirError?: boolean
   model?: string

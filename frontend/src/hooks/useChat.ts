@@ -1,10 +1,11 @@
 import { useCallback, useSyncExternalStore } from 'react'
-import type { AgentEvent, ChatMessage, ContentBlock } from '../lib/types'
+import type { AgentEvent, ChatMessage } from '../lib/types'
 import { chatStore, type HydrateSnapshot } from '../lib/chatStore'
 
 export type {
   ApprovalRequest,
   FileChange,
+  PendingMessage,
   ToolCall,
 } from '../lib/chatStore'
 
@@ -25,10 +26,6 @@ export function useChat() {
     snapshot: HydrateSnapshot,
   ) => {
     chatStore.hydrateSession(sessionId, messages, snapshot)
-  }, [])
-
-  const addUserMessage = useCallback((content: string | ContentBlock[]) => {
-    chatStore.addUserMessage(content)
   }, [])
 
   const handleEvent = useCallback((event: AgentEvent) => {
@@ -52,7 +49,6 @@ export function useChat() {
     activeSessionId: chatStore.getActiveSessionId(),
     activateSession,
     hydrateSession,
-    addUserMessage,
     handleEvent,
     clearAll,
     dismissApproval,

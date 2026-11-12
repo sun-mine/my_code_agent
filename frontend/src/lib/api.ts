@@ -1,13 +1,22 @@
-import type { ApiResponse, AgentStatus, SessionInfo, SessionSnapshot } from './types'
+import type { ApiResponse, AgentStatus, ContentBlock, DeliveryReport, ModelInfo, SessionInfo, SessionSnapshot } from './types'
 
 const BASE = '/api'
+
+export class ApiError extends Error {
+  readonly status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.status = status
+  }
+}
 
 async function get<T>(path: string, params?: Record<string, string>): Promise<T> {
   const query = params ? new URLSearchParams(params).toString() : ''
   const url = `${BASE}${path}${query ? `?${query}` : ''}`
   const r = await fetch(url)
   const json: ApiResponse<T> = await r.json()
-  if (!json.success) throw new Error(json.error || 'API error')
+  if (!json.success) throw new ApiError(json.error || 'API error', r.status)
   return json.data as T
 }
 
@@ -26,7 +35,7 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
     }
     throw new Error(`服务器返回了无法解析的响应（HTTP ${r.status}）`)
   }
-  if (!json.success) throw new Error(json.error || 'API error')
+  if (!json.success) throw new ApiError(json.error || 'API error', r.status)
   return json.data as T
 }
 
@@ -52,14 +61,27 @@ async function put<T>(path: string, body?: unknown): Promise<T> {
 
 // ── Status ────────────────────────────────────────
 export const api = {
-  listModels: () => get<{ models: Array<{ id: string; label: string; provider: string }>; current: string }>('/models'),
-  setModel: (model: string) =>
-    post<{ model: string; message: string }>('/model', { model }),
+  listModels: () => get<{ models: ModelInfo[]; current: string; current_provider: string }>('/models'),
+  setModel: (model: string, provider: string) =>
+    post<{ model: string; provider: string; message: string }>('/model', { model, provider }),
 
   status: () => get<AgentStatus>('/status'),
 
   // ── Chat ────────────────────────────────────────
-  interrupt: (sessionId?: string, runId?: string) => post<unknown>('/chat/interrupt', { session_id: sessionId, run_id: runId }),
+  chat: (message: string | ContentBlock[], mode: string, sessionId: string, requestId: string) =>
+    post<{ run_id: string; session_id: string; status: 'started' | 'accepted' }>('/chat', {
+      message,
+      mode,
+      session_id: sessionId,
+      request_id: requestId,
+    }),
+  interrupt: (sessionId: string, runId: string) =>
+    post<{ interrupt_requested: true; status: 'cancelling'; session_id: string; run_id: string }>('/chat/interrupt', {
+      session_id: sessionId,
+      run_id: runId,
+    }),
+  resumeReview: (sessionId: string, runId: string) =>
+    post<DeliveryReport>('/reviews/resume', { session_id: sessionId, run_id: runId }),
   toolApprove: (tool_use_id: string, approved: boolean, sessionId?: string, runId?: string) =>
     post<unknown>('/chat/tool_approve', { tool_use_id, approved, session_id: sessionId, run_id: runId }),
 

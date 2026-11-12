@@ -1,0 +1,608 @@
+{
+  "summary": {
+    "protocol_hash": "c5d101f113b0635eb64c35c35aa5d25ba0a3140cc2fc1c99194d934973a5da67",
+    "completed": 32,
+    "valid_pairs": 16,
+    "missing": 0,
+    "infrastructure_errors": 0,
+    "groups": {
+      "A": {
+        "stages": {
+          "loc": {
+            "runs": 12,
+            "successes": 0,
+            "mean_recall": 0.0,
+            "mean_seconds": 41.78716610426394,
+            "mean_llm_tokens": 2893.5,
+            "usage_complete_runs": 12,
+            "tool_calls": 10,
+            "stop_reasons": {
+              "end_turn": 10,
+              "model_output_limit": 2
+            }
+          },
+          "repair": {
+            "runs": 4,
+            "successes": 0,
+            "mean_recall": null,
+            "mean_seconds": 41.0743703127373,
+            "mean_llm_tokens": 4567.5,
+            "usage_complete_runs": 4,
+            "tool_calls": 10,
+            "stop_reasons": {
+              "end_turn": 4
+            }
+          }
+        },
+        "hybrid_used_runs": 0,
+        "hybrid_attempts": 0,
+        "hybrid_successes": 0,
+        "query_embedding_tokens": 0,
+        "mean_candidate_coverage": 0.0
+      },
+      "B": {
+        "stages": {
+          "loc": {
+            "runs": 12,
+            "successes": 0,
+            "mean_recall": 0.0,
+            "mean_seconds": 39.189904284779914,
+            "mean_llm_tokens": 3222.3333333333335,
+            "usage_complete_runs": 12,
+            "tool_calls": 10,
+            "stop_reasons": {
+              "end_turn": 10,
+              "model_output_limit": 2
+            }
+          },
+          "repair": {
+            "runs": 4,
+            "successes": 0,
+            "mean_recall": null,
+            "mean_seconds": 46.958390229032375,
+            "mean_llm_tokens": 5470.5,
+            "usage_complete_runs": 4,
+            "tool_calls": 10,
+            "stop_reasons": {
+              "end_turn": 4
+            }
+          }
+        },
+        "hybrid_used_runs": 0,
+        "hybrid_attempts": 0,
+        "hybrid_successes": 0,
+        "query_embedding_tokens": 0,
+        "mean_candidate_coverage": 0.0
+      }
+    }
+  },
+  "localization_evidence": [
+    {
+      "task_id": "loc-01-symbol",
+      "repeat": 1,
+      "profile": "A",
+      "candidate_coverage": 0.0,
+      "candidate_hits": [
+        false,
+        false
+      ],
+      "final_recall": 0.0,
+      "calls": [
+        {
+          "tool": "list_files",
+          "input": {
+            "depth": 2,
+            "path": "."
+          },
+          "target_hits": [
+            false,
+            false
+          ]
+        },
+        {
+          "tool": "lookup_symbol",
+          "input": {
+            "symbol": "Service.fetch",
+            "path": "."
+          },
+          "target_hits": [
+            false,
+            false
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "loc-01-symbol",
+      "repeat": 1,
+      "profile": "B",
+      "candidate_coverage": 0.0,
+      "candidate_hits": [
+        false,
+        false
+      ],
+      "final_recall": 0.0,
+      "calls": [
+        {
+          "tool": "lookup_symbol",
+          "input": {
+            "symbol": "Service.fetch"
+          },
+          "target_hits": [
+            false,
+            false
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "loc-01-symbol",
+      "repeat": 2,
+      "profile": "A",
+      "candidate_coverage": 0.0,
+      "candidate_hits": [
+        false,
+        false
+      ],
+      "final_recall": 0.0,
+      "calls": [
+        {
+          "tool": "list_files",
+          "input": {
+            "path": ".",
+            "depth": 2
+          },
+          "target_hits": [
+            false,
+            false
+          ]
+        },
+        {
+          "tool": "lookup_symbol",
+          "input": {
+            "symbol": "Service.fetch",
+            "path": "."
+          },
+          "target_hits": [
+            false,
+            false
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "loc-01-symbol",
+      "repeat": 2,
+      "profile": "B",
+      "candidate_coverage": 0.0,
+      "candidate_hits": [
+        false,
+        false
+      ],
+      "final_recall": 0.0,
+      "calls": [
+        {
+          "tool": "lookup_symbol",
+          "input": {
+            "symbol": "Service.fetch"
+          },
+          "target_hits": [
+            false,
+            false
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "loc-02-continuation",
+      "repeat": 1,
+      "profile": "A",
+      "candidate_coverage": 0.0,
+      "candidate_hits": [
+        false,
+        false
+      ],
+      "final_recall": 0.0,
+      "calls": []
+    },
+    {
+      "task_id": "loc-02-continuation",
+      "repeat": 1,
+      "profile": "B",
+      "candidate_coverage": 0.0,
+      "candidate_hits": [
+        false,
+        false
+      ],
+      "final_recall": 0.0,
+      "calls": []
+    },
+    {
+      "task_id": "loc-02-continuation",
+      "repeat": 2,
+      "profile": "A",
+      "candidate_coverage": 0.0,
+      "candidate_hits": [
+        false,
+        false
+      ],
+      "final_recall": 0.0,
+      "calls": []
+    },
+    {
+      "task_id": "loc-02-continuation",
+      "repeat": 2,
+      "profile": "B",
+      "candidate_coverage": 0.0,
+      "candidate_hits": [
+        false,
+        false
+      ],
+      "final_recall": 0.0,
+      "calls": []
+    },
+    {
+      "task_id": "loc-03-stop",
+      "repeat": 1,
+      "profile": "A",
+      "candidate_coverage": 0.0,
+      "candidate_hits": [
+        false,
+        false,
+        false
+      ],
+      "final_recall": 0.0,
+      "calls": []
+    },
+    {
+      "task_id": "loc-03-stop",
+      "repeat": 1,
+      "profile": "B",
+      "candidate_coverage": 0.0,
+      "candidate_hits": [
+        false,
+        false,
+        false
+      ],
+      "final_recall": 0.0,
+      "calls": []
+    },
+    {
+      "task_id": "loc-03-stop",
+      "repeat": 2,
+      "profile": "A",
+      "candidate_coverage": 0.0,
+      "candidate_hits": [
+        false,
+        false,
+        false
+      ],
+      "final_recall": 0.0,
+      "calls": []
+    },
+    {
+      "task_id": "loc-03-stop",
+      "repeat": 2,
+      "profile": "B",
+      "candidate_coverage": 0.0,
+      "candidate_hits": [
+        false,
+        false,
+        false
+      ],
+      "final_recall": 0.0,
+      "calls": []
+    },
+    {
+      "task_id": "loc-04-report",
+      "repeat": 1,
+      "profile": "A",
+      "candidate_coverage": 0.0,
+      "candidate_hits": [
+        false,
+        false
+      ],
+      "final_recall": 0.0,
+      "calls": []
+    },
+    {
+      "task_id": "loc-04-report",
+      "repeat": 1,
+      "profile": "B",
+      "candidate_coverage": 0.0,
+      "candidate_hits": [
+        false,
+        false
+      ],
+      "final_recall": 0.0,
+      "calls": []
+    },
+    {
+      "task_id": "loc-04-report",
+      "repeat": 2,
+      "profile": "A",
+      "candidate_coverage": 0.0,
+      "candidate_hits": [
+        false,
+        false
+      ],
+      "final_recall": 0.0,
+      "calls": []
+    },
+    {
+      "task_id": "loc-04-report",
+      "repeat": 2,
+      "profile": "B",
+      "candidate_coverage": 0.0,
+      "candidate_hits": [
+        false,
+        false
+      ],
+      "final_recall": 0.0,
+      "calls": []
+    },
+    {
+      "task_id": "loc-05-language",
+      "repeat": 1,
+      "profile": "A",
+      "candidate_coverage": 0.0,
+      "candidate_hits": [
+        false,
+        false
+      ],
+      "final_recall": 0.0,
+      "calls": [
+        {
+          "tool": "lookup_symbol",
+          "input": {
+            "symbol": "submit_locations",
+            "path": "."
+          },
+          "target_hits": [
+            false,
+            false
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "loc-05-language",
+      "repeat": 1,
+      "profile": "B",
+      "candidate_coverage": 0.0,
+      "candidate_hits": [
+        false,
+        false
+      ],
+      "final_recall": 0.0,
+      "calls": []
+    },
+    {
+      "task_id": "loc-05-language",
+      "repeat": 2,
+      "profile": "A",
+      "candidate_coverage": 0.0,
+      "candidate_hits": [
+        false,
+        false
+      ],
+      "final_recall": 0.0,
+      "calls": [
+        {
+          "tool": "lookup_symbol",
+          "input": {
+            "symbol": "submit_locations",
+            "path": "."
+          },
+          "target_hits": [
+            false,
+            false
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "loc-05-language",
+      "repeat": 2,
+      "profile": "B",
+      "candidate_coverage": 0.0,
+      "candidate_hits": [
+        false,
+        false
+      ],
+      "final_recall": 0.0,
+      "calls": []
+    },
+    {
+      "task_id": "loc-06-retry",
+      "repeat": 1,
+      "profile": "A",
+      "candidate_coverage": 0.0,
+      "candidate_hits": [
+        false,
+        false
+      ],
+      "final_recall": 0.0,
+      "calls": [
+        {
+          "tool": "list_files",
+          "input": {
+            "depth": 1,
+            "path": "."
+          },
+          "target_hits": [
+            false,
+            false
+          ]
+        },
+        {
+          "tool": "read_file",
+          "input": {
+            "path": "./api_server.py",
+            "start_line": 1
+          },
+          "target_hits": [
+            false,
+            false
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "loc-06-retry",
+      "repeat": 1,
+      "profile": "B",
+      "candidate_coverage": 0.0,
+      "candidate_hits": [
+        false,
+        false
+      ],
+      "final_recall": 0.0,
+      "calls": [
+        {
+          "tool": "list_files",
+          "input": {
+            "depth": 2,
+            "path": "."
+          },
+          "target_hits": [
+            false,
+            false
+          ]
+        },
+        {
+          "tool": "grep",
+          "input": {
+            "glob": "./api_server.py",
+            "path": "./",
+            "pattern": "agent message"
+          },
+          "target_hits": [
+            false,
+            false
+          ]
+        },
+        {
+          "tool": "grep",
+          "input": {
+            "glob": "*.py",
+            "path": "./",
+            "pattern": "api|routes"
+          },
+          "target_hits": [
+            false,
+            false
+          ]
+        },
+        {
+          "tool": "grep",
+          "input": {
+            "pattern": "api|routes",
+            "glob": "*.py",
+            "path": "./"
+          },
+          "target_hits": [
+            false,
+            false
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "loc-06-retry",
+      "repeat": 2,
+      "profile": "A",
+      "candidate_coverage": 0.0,
+      "candidate_hits": [
+        false,
+        false
+      ],
+      "final_recall": 0.0,
+      "calls": [
+        {
+          "tool": "list_files",
+          "input": {
+            "depth": 1,
+            "path": "."
+          },
+          "target_hits": [
+            false,
+            false
+          ]
+        },
+        {
+          "tool": "read_file",
+          "input": {
+            "path": "./api_server.py",
+            "start_line": 1
+          },
+          "target_hits": [
+            false,
+            false
+          ]
+        }
+      ]
+    },
+    {
+      "task_id": "loc-06-retry",
+      "repeat": 2,
+      "profile": "B",
+      "candidate_coverage": 0.0,
+      "candidate_hits": [
+        false,
+        false
+      ],
+      "final_recall": 0.0,
+      "calls": [
+        {
+          "tool": "list_files",
+          "input": {
+            "depth": 2,
+            "path": "."
+          },
+          "target_hits": [
+            false,
+            false
+          ]
+        },
+        {
+          "tool": "grep",
+          "input": {
+            "path": "./",
+            "pattern": "agent message",
+            "glob": "./api_server.py"
+          },
+          "target_hits": [
+            false,
+            false
+          ]
+        },
+        {
+          "tool": "grep",
+          "input": {
+            "glob": "*.py",
+            "path": "./",
+            "pattern": "api|routes"
+          },
+          "target_hits": [
+            false,
+            false
+          ]
+        },
+        {
+          "tool": "grep",
+          "input": {
+            "glob": "*.py",
+            "path": "./",
+            "pattern": "api|routes"
+          },
+          "target_hits": [
+            false,
+            false
+          ]
+        }
+      ]
+    }
+  ],
+  "coverage_note": "Successful tool outputs only; directory listings excluded. Source spans are replayed from the frozen snapshot. This is candidate evidence coverage, not final task success or a new A/B score."
+}

@@ -23,6 +23,22 @@ test('tool results stay attached to the original assistant turn', () => {
   assert.equal(messages[1].content, 'finished')
   assert.equal(messages[1].toolCalls?.[0].output, 'file contents')
   assert.equal(messages[1].steps?.[0].toolCall?.status, 'done')
+  assert.equal(messages[1].toolCalls?.[0].ts_end, undefined)
+  assert.equal(messages[1].toolCalls?.[0].duration, undefined)
+})
+
+test('saved command results retain cancellation and actual duration', () => {
+  const messages = historyToMessages([
+    { role: 'assistant', content: [{ type: 'tool_use', id: 'bash-1', name: 'bash', input: { command: 'sleep 30' } }] },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'bash-1', is_error: true, content: JSON.stringify({
+      stdout: '', stderr: 'stopped', exit_code: -15, cancelled: true, timed_out: false, duration: 0.125,
+    }) }] },
+  ])
+  const tool = messages[0].toolCalls?.[0]
+  assert.equal(tool?.status, 'cancelled')
+  assert.equal(tool?.duration, 0.125)
+  assert.equal(tool?.exit_code, -15)
+  assert.equal(tool?.output, 'stopped')
 })
 
 test('image attachments and thinking survive history restoration', () => {

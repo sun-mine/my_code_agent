@@ -19,19 +19,21 @@ from typing import Any, Dict, List, Optional
 from flask import Flask
 from flask_cors import CORS
 from flask_socketio import SocketIO
-from dotenv import load_dotenv
+from components.config import Config, load_environment
 
-load_dotenv(override=True)
+load_environment()
+_server_config = Config()
 
 sys.path.insert(0, str(Path(__file__).parent))
 
 from components.session_store import SessionStore  # noqa: E402
+from components.command_runner import CancellationToken  # noqa: E402
 
 # ====== Flask & SocketIO ======
 app = Flask(__name__)
-CORS(app, origins="*")
+CORS(app, origins=_server_config.cors_origins)
 # threading 模式：稳定可靠；断线重连与数据恢复由前端 useAgentSocket 自动处理
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+socketio = SocketIO(app, cors_allowed_origins=_server_config.cors_origins, async_mode="threading")
 
 # ====== 全局状态 ======
 _lock = threading.RLock()
@@ -68,9 +70,19 @@ class RunContext:
     title: str
     store: SessionStore
     baseline_length: int
+    run_reporter: Any = None
+    prefetch_context: bool = True
+    delivery_report: Optional[Dict[str, Any]] = None
     event_seq: int = 0
     events: List[Dict[str, Any]] = field(default_factory=list)
     pending_run_end: Optional[Dict[str, Any]] = None
+    review_config: Dict[str, Any] = field(default_factory=dict)
+    review_result: Optional[Dict[str, Any]] = None
+    review_package: Optional[Dict[str, Any]] = None
+    review_token: Any = field(default_factory=CancellationToken)
+    phase: str = "running"
+    # Strong references make identity lookup safe even after history slice replacement.
+    history_owners: list = field(default_factory=list)
 
 
 _running_ctx: Optional[RunContext] = None
@@ -78,8 +90,8 @@ _running_ctx: Optional[RunContext] = None
 # ====== 工具审批状态 ======
 _pending_approvals: dict = {}   # tool_use_id -> approval metadata
 _approval_lock = threading.Lock()
-_approval_timeout_seconds = 120.0
-_current_mode: str = "auto"     # plan | auto | manual
+_approval_timeout_seconds = _server_config.approval_timeout
+_current_mode: str = _server_config.mode     # plan | auto | manual
 
 
 # 当本文件以 `python3 api_server.py` 直接运行时，模块名是 `__main__` 而非 `api_server`，
@@ -97,6 +109,7 @@ from api.routes.sessions import sessions_bp  # noqa: E402
 from api.routes.files import files_bp  # noqa: E402
 from api.routes.models import models_bp  # noqa: E402
 from api.routes.admin import admin_bp  # noqa: E402
+from api.reviews import reviews_bp  # noqa: E402
 from api import socket_handlers  # noqa: E402
 
 # ====== 对外暴露的兼容接口（供 tests / 外部调用方使用 api_server.X 访问） ======
@@ -130,11 +143,14 @@ app.register_blueprint(sessions_bp)
 app.register_blueprint(files_bp)
 app.register_blueprint(models_bp)
 app.register_blueprint(admin_bp)
+app.register_blueprint(reviews_bp)
 socket_handlers.register(socketio)
 
 
 # ====== 启动 ======
-def run_server(host="0.0.0.0", port=8000, debug=False):
+def run_server(host=None, port=None, debug=False):
+    host = _server_config.host if host is None else host
+    port = _server_config.port if port is None else port
     print("正在初始化 Agent...")
     ensure_agent_initialized()
     print(f"API 服务启动: http://{host}:{port}")

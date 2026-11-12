@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../../lib/api'
 
@@ -28,15 +28,6 @@ export function FilePreview({ path, onClose, onAddToChat }: FileEditorProps) {
     queryFn: () => api.fileContent(path!),
     enabled: !!path,
   })
-
-  useEffect(() => {
-    if (data) setDraft(data.content)
-  }, [data])
-
-  useEffect(() => {
-    setEditMode(false)
-    setSaveMsg('')
-  }, [path])
 
   if (!path) return null
 
@@ -115,9 +106,9 @@ export function FilePreview({ path, onClose, onAddToChat }: FileEditorProps) {
                 添加到对话
               </button>
             )}
-            {isText && !editMode && (
+            {data && isText && !editMode && (
               <button
-                onClick={() => setEditMode(true)}
+                onClick={() => { setDraft(data?.content ?? ''); setEditMode(true) }}
                 style={{
                   padding: '3px 10px', borderRadius: 5, fontSize: 12,
                   background: 'var(--bg-overlay)', border: '1px solid var(--border-hi)',

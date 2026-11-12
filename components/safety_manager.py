@@ -231,43 +231,19 @@ class SafetyManager:
     # ==================== 沙箱模式 ====================
     
     def enter_sandbox(self) -> str:
-        """进入沙箱模式"""
-        if self.sandbox_mode:
-            return "已在沙箱模式中"
-        
-        # 清空沙箱目录
-        if self.sandbox_dir.exists():
-            shutil.rmtree(self.sandbox_dir)
-        self.sandbox_dir.mkdir()
-        
-        # 创建必要的子目录
-        (self.sandbox_dir / "workspace").mkdir()
-        (self.sandbox_dir / "temp").mkdir()
-        
-        self.sandbox_mode = True
-        
-        self._log_audit("enter_sandbox", {}, "MEDIUM")
-        
-        return "已进入沙箱模式，所有操作将在隔离环境中执行"
+        """Do not advertise isolation until execution tools actually enforce it."""
+        return "Error: 安全沙箱尚未实现，文件与命令工具仍在原工作区执行。"
     
     def exit_sandbox(self, discard: bool = True) -> str:
         """退出沙箱模式"""
         if not self.sandbox_mode:
             return "未在沙箱模式中"
         
-        result = ""
-        if not discard:
-            # 合并沙箱更改到主workspace
-            result = "沙箱更改已应用到主工作区"
-            # 这里可以添加选择性合并的逻辑
-        else:
-            result = "沙箱更改已丢弃"
-        
         self.sandbox_mode = False
         
         self._log_audit("exit_sandbox", {"discard": discard}, "MEDIUM")
         
-        return result
+        return "Error: 旧沙箱标记已清除；未应用或丢弃任何工作区更改。"
     
     def get_sandbox_path(self, relative_path: str) -> Path:
         """获取沙箱中的路径"""

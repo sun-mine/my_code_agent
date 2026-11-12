@@ -7,13 +7,13 @@ export function getStoredTheme(): Theme {
     const stored = localStorage.getItem(THEME_KEY)
     if (stored === 'dark' || stored === 'light') return stored
     if (stored === 'beige') return 'light' // 旧值迁移
-  } catch {}
+  } catch { /* Storage can be unavailable in privacy mode. */ }
   return 'dark'
 }
 
 export function applyTheme(theme: Theme): void {
   document.documentElement.setAttribute('data-theme', theme)
-  try { localStorage.setItem(THEME_KEY, theme) } catch {}
+  try { localStorage.setItem(THEME_KEY, theme) } catch { /* Keep the applied in-memory theme. */ }
 }
 
 export function toggleTheme(): Theme {

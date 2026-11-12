@@ -58,13 +58,14 @@ def get_status():
     }
 
     return _ok({
-        "agent_state": api_server.agent_instance.state,
+        "agent_state": "reviewing" if api_server._running_ctx and api_server._running_ctx.phase == "reviewing" else api_server.agent_instance.state,
         "run_id": api_server._running_ctx.run_id if api_server._running_ctx else None,
         "session_id": api_server._active_session_id,
         "running_session_id": api_server._running_ctx.session_id if api_server._running_ctx else None,
         "running_run_id": api_server._running_ctx.run_id if api_server._running_ctx else None,
         "workdir": api_server.agent_config["workdir"] if api_server.agent_config else "",
         "model": api_server.agent_config["model"] if api_server.agent_config else "",
+        "github_mcp": (api_server.agent_config or {}).get("github_mcp", {"status": "disabled", "tools": []}),
         "history_length": len(active_history),
         "token_usage": token_usage,
         "token_breakdown": token_breakdown,

@@ -2,18 +2,44 @@ export const STATUS_LABEL: Record<string, string> = {
   idle:           '空闲',
   thinking:       '思考中',
   executing_tool: '执行工具',
+  reviewing:      'A2A 审查中',
+  cancelling:     '停止中',
 }
 
 /** Strip ANSI escape codes and other terminal control sequences from a string */
 export function stripAnsi(str: string): string {
-  return str
-    // eslint-disable-next-line no-control-regex
-    .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')     // CSI sequences (colors, cursor moves)
-    .replace(/\x1b\][0-9;]*[^\x07]*\x07/g, '')  // OSC sequences (title, hyperlinks)
-    .replace(/\x1b[PX^_].*?\x1b\\/g, '')         // DCS, SOS, PM, APC sequences
-    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '') // other control chars (keep \n, \t)
-    .replace(/\r\n/g, '\n')                       // CRLF → LF
-    .replace(/\r/g, '\n')                         // CR → LF (progress bars)
-    .replace(/\x08+\n/g, '\n')                     // backspace-then-newline (overwrite lines)
-    .replace(/[^\S\n]+$/gm, '')                   // trailing whitespace per line
+  let clean = ''
+  for (let index = 0; index < str.length; index += 1) {
+    const code = str.charCodeAt(index)
+    if (code === 0x1b) {
+      const kind = str[index + 1]
+      if (kind === '[') {
+        index += 2
+        while (index < str.length) {
+          const byte = str.charCodeAt(index)
+          if (byte >= 0x40 && byte <= 0x7e) break
+          index += 1
+        }
+      } else if (kind === ']' || kind === 'P' || kind === 'X' || kind === '^' || kind === '_') {
+        index += 2
+        while (index < str.length) {
+          if (str.charCodeAt(index) === 0x07) break
+          if (str.charCodeAt(index) === 0x1b && str[index + 1] === '\\') {
+            index += 1
+            break
+          }
+          index += 1
+        }
+      }
+      continue
+    }
+    if (code === 0x0d) {
+      if (str.charCodeAt(index + 1) === 0x0a) index += 1
+      clean += '\n'
+      continue
+    }
+    if (code <= 0x08 || code === 0x0b || code === 0x0c || (code >= 0x0e && code <= 0x1f)) continue
+    clean += str[index]
+  }
+  return clean.replace(/[^\S\n]+$/gm, '')
 }

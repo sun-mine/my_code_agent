@@ -3,8 +3,8 @@ from flask import Blueprint, request
 
 import api_server
 from api.agent_core import _require_agent
-from api.session_helpers import _ok, _err
-from api.run_lifecycle import _start_run
+from api.session_helpers import _ok, _err, _chat_content
+from api.run_lifecycle import _start_run, interrupt_owned_run
 
 chat_bp = Blueprint("chat", __name__)
 
@@ -15,16 +15,18 @@ def chat():
     if r:
         return r
     data = request.get_json(force=True)
-    message = (data.get("message") or "").strip()
-    if not message:
-        return _err("message required")
+    try:
+        message, title = _chat_content(data.get("message"))
+    except ValueError as exc:
+        return _err(exc)
     new_mode = data.get("mode", "auto")
     result, error, status = _start_run(
         data.get("session_id"),
         message,
         new_mode,
         plan_mode=(new_mode == "plan"),
-        title_message=message,
+        title_message=title,
+        request_id=data.get("request_id"),
     )
     if error:
         return _err(error, status)
@@ -59,7 +61,8 @@ def plan_execute():
         f"</plan-execute>"
     )
     result, error, status = _start_run(
-        data.get("session_id"), execute_instruction, "auto", plan_mode=False
+        data.get("session_id"), execute_instruction, "auto", plan_mode=False,
+        prefetch_context=False,
     )
     if error:
         return _err(error, status)
@@ -73,6 +76,8 @@ def interrupt_chat():
     if r:
         return r
     data = request.get_json(silent=True) or {}
+    if not data.get("session_id") or not data.get("run_id"):
+        return _err("session_id and run_id required")
     with api_server._lock:
         context = api_server._running_ctx
         if context is None:
@@ -83,9 +88,11 @@ def interrupt_chat():
             return _err("session does not own the running agent", 409)
         if requested_run and requested_run != context.run_id:
             return _err("run does not match the running agent", 409)
-        context.agent.interrupt()
+        if not interrupt_owned_run(context):
+            return _err("agent run is already finishing", 409)
         return _ok({
-            "interrupted": True,
+            "interrupt_requested": True,
+            "status": "cancelling",
             "session_id": context.session_id,
             "run_id": context.run_id,
         })

@@ -4,6 +4,7 @@
   "private": true,
   "description": "本地运行的 AI 编程工作台：Flask 后端与 React 前端",
   "scripts": {
+    "test": "npm --prefix frontend test",
     "dev": "npm --prefix frontend run dev",
     "build": "npm --prefix frontend run build",
     "lint": "npm --prefix frontend run lint",

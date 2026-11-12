@@ -39,7 +39,9 @@ WORKTREE_HANDLERS = {
     "worktree_create": lambda **kw: get_worktrees().create(kw["name"], kw.get("task_id"), kw.get("base_ref", "HEAD")),
     "worktree_list": lambda **kw: get_worktrees().list_all(),
     "worktree_status": lambda **kw: get_worktrees().status(kw["name"]),
-    "worktree_run": lambda **kw: get_worktrees().run(kw["name"], kw["command"]),
+    "worktree_run": lambda **kw: get_worktrees().run(
+        kw["name"], kw["command"], kw.get("_cancel_token")
+    ),
     "worktree_keep": lambda **kw: get_worktrees().keep(kw["name"]),
     "worktree_remove": lambda **kw: get_worktrees().remove(kw["name"], kw.get("force", False), kw.get("complete_task", False)),
     "worktree_events": lambda **kw: get_events().list_recent(kw.get("limit", 20)),
